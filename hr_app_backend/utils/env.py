@@ -19,4 +19,4 @@ def get_list(name, default=None, separator=","):
     if value is None:
         return fallback
 
-    return config(name, cast=Csv(separator=separator))
+    return config(name, cast=Csv(delimiter=separator))

@@ -9,6 +9,12 @@ DJANGO_APPS = [
 
 THIRD_PARTY_APPS = []
 
-LOCAL_APPS = []
+LOCAL_APPS = [
+    'hr_app_backend.attendance',
+    'hr_app_backend.authentication',
+    'hr_app_backend.departments',
+    'hr_app_backend.employees',
+    'hr_app_backend.leave',
+]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS

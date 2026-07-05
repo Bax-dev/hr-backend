@@ -3,14 +3,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from hr_app_backend.utils import get_env
+from hr_app_backend.utils import AppError, get_env
 
 
 PAYSTACK_BASE_URL = "https://api.paystack.co"
 
 
-class PaystackError(Exception):
-    pass
+class PaystackError(AppError):
+    default_status_code = 502
 
 
 class PaystackClient:

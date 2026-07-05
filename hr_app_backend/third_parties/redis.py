@@ -1,3 +1,5 @@
+import redis
+
 from hr_app_backend.utils import get_env
 
 
@@ -17,3 +19,7 @@ def build_django_cache_config(url=None, key_prefix="hr_app_backend"):
         "KEY_PREFIX": key_prefix,
         "TIMEOUT": 300,
     }
+
+
+def get_redis_client(url=None):
+    return redis.Redis.from_url(url or get_redis_url(), decode_responses=True)
