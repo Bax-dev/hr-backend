@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from hr_app_backend.third_parties import build_django_cache_config
-from hr_app_backend.utils import get_bool, get_env, get_list
+from hr_app_backend.utils import get_bool, get_env, get_int, get_list
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -65,8 +65,16 @@ WSGI_APPLICATION = 'hr_app_backend.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': get_env('DB_NAME', 'hr_app_db'),
+        'USER': get_env('DB_USER', 'postgres'),
+        'PASSWORD': get_env('DB_PASSWORD', ''),
+        'HOST': get_env('DB_HOST', '127.0.0.1'),
+        'PORT': get_int('DB_PORT', 5432),
+        'CONN_MAX_AGE': get_int('DB_CONN_MAX_AGE', 60),
+        'OPTIONS': {
+            'sslmode': get_env('DB_SSLMODE', 'prefer'),
+        },
     }
 }
 
@@ -116,7 +124,7 @@ SESSION_CACHE_ALIAS = 'default'
 
 EMAIL_BACKEND = get_env('DJANGO_EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
 EMAIL_HOST = get_env('DJANGO_EMAIL_HOST', 'smtp.gmail.com')
-EMAIL_PORT = int(get_env('DJANGO_EMAIL_PORT', 587))
+EMAIL_PORT = get_int('DJANGO_EMAIL_PORT', 587)
 EMAIL_HOST_USER = get_env('DJANGO_EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = get_env('DJANGO_EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = get_bool('DJANGO_EMAIL_USE_TLS', default=True)
@@ -126,6 +134,8 @@ DEFAULT_FROM_EMAIL = get_env('DJANGO_DEFAULT_FROM_EMAIL', 'noreply@hrapp.local')
 PAYSTACK_SECRET_KEY = get_env('PAYSTACK_SECRET_KEY', '')
 PAYSTACK_PUBLIC_KEY = get_env('PAYSTACK_PUBLIC_KEY', '')
 PAYSTACK_BASE_URL = get_env('PAYSTACK_BASE_URL', 'https://api.paystack.co')
+
+CSRF_TRUSTED_ORIGINS = get_list('DJANGO_CSRF_TRUSTED_ORIGINS', default=[])
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

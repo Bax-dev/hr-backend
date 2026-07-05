@@ -1,29 +1,22 @@
-import os
+from decouple import Csv, config
 
 
 def get_env(name, default=None):
-    return os.getenv(name, default)
+    return config(name, default=default)
 
 
 def get_bool(name, default=False):
-    value = os.getenv(name)
-    if value is None:
-        return default
-
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    return config(name, default=default, cast=bool)
 
 
 def get_int(name, default=0):
-    value = os.getenv(name)
-    if value is None:
-        return default
-
-    return int(value)
+    return config(name, default=default, cast=int)
 
 
 def get_list(name, default=None, separator=","):
-    value = os.getenv(name)
+    fallback = default[:] if isinstance(default, list) else (default or [])
+    value = config(name, default=None)
     if value is None:
-        return default[:] if isinstance(default, list) else (default or [])
+        return fallback
 
-    return [item.strip() for item in value.split(separator) if item.strip()]
+    return config(name, cast=Csv(separator=separator))
