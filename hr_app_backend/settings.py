@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from hr_app_backend.config import DATABASES, INSTALLED_APPS
 from hr_app_backend.third_parties import build_django_cache_config
 from hr_app_backend.utils import get_bool, get_env, get_int, get_list
 
@@ -16,18 +17,6 @@ if not SECRET_KEY:
         raise RuntimeError("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is disabled.")
 
 ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
-
-
-# Application definition
-
-INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -58,27 +47,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'hr_app_backend.wsgi.application'
-
-
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': get_env('DB_NAME', 'hr_app_db'),
-        'USER': get_env('DB_USER', 'postgres'),
-        'PASSWORD': get_env('DB_PASSWORD', ''),
-        'HOST': get_env('DB_HOST', '127.0.0.1'),
-        'PORT': get_int('DB_PORT', 5432),
-        'CONN_MAX_AGE': get_int('DB_CONN_MAX_AGE', 60),
-        'OPTIONS': {
-            'sslmode': get_env('DB_SSLMODE', 'prefer'),
-        },
-    }
-}
-
-
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
 
