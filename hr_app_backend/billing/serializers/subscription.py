@@ -1,0 +1,20 @@
+def serialize_subscription(subscription):
+    return {
+        'id': str(subscription.id),
+        'organization_id': str(subscription.organization_id),
+        'created_by_id': str(subscription.created_by_id),
+        'plan': subscription.plan,
+        'provider': subscription.provider,
+        'status': subscription.status,
+        'reference': subscription.reference,
+        'amount': str(subscription.amount),
+        'currency': subscription.currency,
+        'start_date': subscription.start_date.isoformat(),
+        'end_date': subscription.end_date.isoformat() if subscription.end_date else None,
+        'payment_url': subscription.payment_url,
+        'access_code': subscription.access_code,
+        'gateway_transaction_id': subscription.gateway_transaction_id,
+        'paid_at': subscription.paid_at.isoformat() if subscription.paid_at else None,
+        'created_at': subscription.created_at.isoformat(),
+        'updated_at': subscription.updated_at.isoformat(),
+    }

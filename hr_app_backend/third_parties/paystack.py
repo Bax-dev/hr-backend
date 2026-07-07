@@ -10,7 +10,7 @@ PAYSTACK_BASE_URL = "https://api.paystack.co"
 
 
 class PaystackError(AppError):
-    default_status_code = 502
+    status_code = 502
 
 
 class PaystackClient:
