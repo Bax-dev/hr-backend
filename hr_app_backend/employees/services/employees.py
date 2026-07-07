@@ -33,7 +33,7 @@ def _validate_email_address(email):
         raise ValidationError('A valid email address is required.') from exc
 
 
-def _clean_hire_date(value):
+def _clean_date(value, label):
     if value in (None, ''):
         return None
     if isinstance(value, datetime.date):
@@ -41,7 +41,7 @@ def _clean_hire_date(value):
     try:
         return datetime.date.fromisoformat(str(value))
     except ValueError as exc:
-        raise ValidationError('Hire date must be an ISO date (YYYY-MM-DD).') from exc
+        raise ValidationError(f'{label} must be an ISO date (YYYY-MM-DD).') from exc
 
 
 def _clean_salary(value):
@@ -129,7 +129,8 @@ def create_employee(user, data):
         status=_clean_status(data.get('status')),
         gender=(data.get('gender') or '').strip(),
         country=(data.get('country') or '').strip(),
-        hire_date=_clean_hire_date(data.get('hire_date')),
+        hire_date=_clean_date(data.get('hire_date'), 'Hire date'),
+        date_of_birth=_clean_date(data.get('date_of_birth'), 'Date of birth'),
         salary=_clean_salary(data.get('salary')),
         avatar=(data.get('avatar') or '').strip(),
         manager=(data.get('manager') or '').strip(),
@@ -175,7 +176,9 @@ def update_employee(user, employee_pk, data):
     if 'status' in data:
         employee.status = _clean_status(data['status'])
     if 'hire_date' in data:
-        employee.hire_date = _clean_hire_date(data['hire_date'])
+        employee.hire_date = _clean_date(data['hire_date'], 'Hire date')
+    if 'date_of_birth' in data:
+        employee.date_of_birth = _clean_date(data['date_of_birth'], 'Date of birth')
     if 'salary' in data:
         employee.salary = _clean_salary(data['salary'])
 

@@ -12,6 +12,7 @@ def serialize_employee(employee):
         'gender': employee.gender,
         'country': employee.country,
         'hire_date': employee.hire_date.isoformat() if employee.hire_date else None,
+        'date_of_birth': employee.date_of_birth.isoformat() if employee.date_of_birth else None,
         'salary': float(employee.salary) if employee.salary is not None else None,
         'avatar': employee.avatar or None,
         'manager': employee.manager or None,

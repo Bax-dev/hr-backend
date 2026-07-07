@@ -26,6 +26,7 @@ class Employee(TimeStampedModel):
     gender = models.CharField(max_length=32, blank=True)
     country = models.CharField(max_length=64, blank=True)
     hire_date = models.DateField(null=True, blank=True)
+    date_of_birth = models.DateField(null=True, blank=True)
     salary = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     avatar = models.URLField(blank=True)
     manager = models.CharField(max_length=255, blank=True)

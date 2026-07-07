@@ -18,6 +18,7 @@ EMPLOYEE_FIELDS = [
     ('gender', 'gender'),
     ('country', 'country'),
     ('hire_date', 'hire_date', 'hireDate'),
+    ('date_of_birth', 'date_of_birth', 'dateOfBirth'),
     ('salary', 'salary'),
     ('avatar', 'avatar'),
     ('manager', 'manager'),
