@@ -5,7 +5,6 @@ def _value(payload, *keys, default=''):
     return default
 
 
-# Fields the API accepts, as (model_field, *accepted_payload_keys).
 EMPLOYEE_FIELDS = [
     ('employee_id', 'employee_id', 'employeeId'),
     ('first_name', 'first_name', 'firstName'),
@@ -13,7 +12,10 @@ EMPLOYEE_FIELDS = [
     ('email', 'email'),
     ('phone', 'phone'),
     ('department', 'department'),
+    ('department_record_id', 'department_record_id', 'departmentRecordId', 'departmentId'),
+    ('team_id', 'team_id', 'teamId'),
     ('position', 'position'),
+    ('designation_id', 'designation_id', 'designationId'),
     ('status', 'status'),
     ('gender', 'gender'),
     ('country', 'country'),
@@ -22,6 +24,7 @@ EMPLOYEE_FIELDS = [
     ('salary', 'salary'),
     ('avatar', 'avatar'),
     ('manager', 'manager'),
+    ('manager_employee_id', 'manager_employee_id', 'managerEmployeeId', 'managerId'),
 ]
 
 

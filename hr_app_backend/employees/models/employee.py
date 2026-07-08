@@ -1,7 +1,11 @@
 from django.db import models
 
 from hr_app_backend.authentication.models import Organization
+from hr_app_backend.departments.models import Department
 from hr_app_backend.utils import TimeStampedModel
+
+from .designation import Designation
+from .team import Team
 
 
 class Employee(TimeStampedModel):
@@ -21,7 +25,28 @@ class Employee(TimeStampedModel):
     email = models.EmailField()
     phone = models.CharField(max_length=32, blank=True)
     department = models.CharField(max_length=128, blank=True)
+    department_record = models.ForeignKey(
+        Department,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='employees_by_record',
+    )
+    team = models.ForeignKey(
+        Team,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='members',
+    )
     position = models.CharField(max_length=128, blank=True)
+    designation = models.ForeignKey(
+        Designation,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='employees',
+    )
     status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_ACTIVE)
     gender = models.CharField(max_length=32, blank=True)
     country = models.CharField(max_length=64, blank=True)
@@ -30,6 +55,13 @@ class Employee(TimeStampedModel):
     salary = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     avatar = models.URLField(blank=True)
     manager = models.CharField(max_length=255, blank=True)
+    manager_employee = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='direct_reports',
+    )
 
     class Meta:
         ordering = ['first_name', 'last_name']

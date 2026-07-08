@@ -10,5 +10,7 @@ urlpatterns = [
     path('billing/', include('hr_app_backend.billing.urls')),
     path('employees/', include('hr_app_backend.employees.urls')),
     path('leave/', include('hr_app_backend.leave.urls')),
+    path('talent/', include('hr_app_backend.talent.urls')),
+    path('people/', include('hr_app_backend.people.urls')),
     path("health/", health_check, name="health-check"),
 ]

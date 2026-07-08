@@ -1,11 +1,12 @@
 import datetime
 import decimal
 
-from django.core.validators import validate_email
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Q
 
+from hr_app_backend.departments.models import Department
 from hr_app_backend.utils.errors import (
     ConflictError,
     NotFoundError,
@@ -13,7 +14,7 @@ from hr_app_backend.utils.errors import (
     ValidationError,
 )
 
-from ..models import Employee
+from ..models import Designation, Employee, Team
 
 REQUIRED_FIELDS = ('first_name', 'last_name', 'email')
 
@@ -63,6 +64,16 @@ def _clean_status(value):
     return status
 
 
+def _clean_text(value):
+    return (value or '').strip()
+
+
+def _display_employee_name(employee):
+    if employee is None:
+        return ''
+    return f'{employee.first_name} {employee.last_name}'.strip()
+
+
 def _next_employee_id(organization):
     count = Employee.objects.filter(organization=organization).count()
     while True:
@@ -72,9 +83,60 @@ def _next_employee_id(organization):
             return candidate
 
 
+def _resolve_department(organization, department_id):
+    if department_id in (None, ''):
+        return None
+    try:
+        return Department.objects.get(organization=organization, pk=department_id)
+    except Department.DoesNotExist as exc:
+        raise ValidationError('Selected department does not exist for this organization.') from exc
+
+
+def _resolve_team(organization, team_id):
+    if team_id in (None, ''):
+        return None
+    try:
+        return Team.objects.select_related('department').get(organization=organization, pk=team_id)
+    except Team.DoesNotExist as exc:
+        raise ValidationError('Selected team does not exist for this organization.') from exc
+
+
+def _resolve_designation(organization, designation_id):
+    if designation_id in (None, ''):
+        return None
+    try:
+        return Designation.objects.get(organization=organization, pk=designation_id)
+    except Designation.DoesNotExist as exc:
+        raise ValidationError('Selected designation does not exist for this organization.') from exc
+
+
+def _resolve_manager(organization, manager_employee_id, current_employee=None):
+    if manager_employee_id in (None, ''):
+        return None
+    try:
+        manager = Employee.objects.get(organization=organization, pk=manager_employee_id)
+    except Employee.DoesNotExist as exc:
+        raise ValidationError('Selected manager does not exist for this organization.') from exc
+
+    if current_employee is not None and manager.pk == current_employee.pk:
+        raise ValidationError('An employee cannot be their own manager.')
+
+    return manager
+
+
+def _validate_relationships(department_record, team):
+    if department_record and team and team.department_id and team.department_id != department_record.id:
+        raise ValidationError('Selected team does not belong to the selected department.')
+
+
 def list_employees(user, search=None, department=None, status=None):
     organization = _require_organization(user)
-    queryset = Employee.objects.filter(organization=organization)
+    queryset = Employee.objects.filter(organization=organization).select_related(
+        'department_record',
+        'team',
+        'designation',
+        'manager_employee',
+    )
 
     if search:
         queryset = queryset.filter(
@@ -84,7 +146,10 @@ def list_employees(user, search=None, department=None, status=None):
             | Q(employee_id__icontains=search)
         )
     if department:
-        queryset = queryset.filter(department__iexact=department)
+        queryset = queryset.filter(
+            Q(department__iexact=department)
+            | Q(department_record__name__iexact=department)
+        )
     if status:
         queryset = queryset.filter(status=_clean_status(status))
 
@@ -94,7 +159,12 @@ def list_employees(user, search=None, department=None, status=None):
 def get_employee(user, employee_pk):
     organization = _require_organization(user)
     try:
-        return Employee.objects.get(organization=organization, pk=employee_pk)
+        return Employee.objects.select_related(
+            'department_record',
+            'team',
+            'designation',
+            'manager_employee',
+        ).get(organization=organization, pk=employee_pk)
     except Employee.DoesNotExist as exc:
         raise NotFoundError('Employee not found.') from exc
 
@@ -104,36 +174,50 @@ def create_employee(user, data):
     organization = _require_organization(user)
 
     for field in REQUIRED_FIELDS:
-        if not (data.get(field) or '').strip():
+        if not _clean_text(data.get(field)):
             raise ValidationError(f'{field.replace("_", " ").capitalize()} is required.')
 
-    email = data['email'].strip().lower()
+    email = _clean_text(data['email']).lower()
     _validate_email_address(email)
 
     if Employee.objects.filter(organization=organization, email=email).exists():
         raise ConflictError('An employee with this email already exists.')
 
-    employee_id = (data.get('employee_id') or '').strip() or _next_employee_id(organization)
+    employee_id = _clean_text(data.get('employee_id')) or _next_employee_id(organization)
     if Employee.objects.filter(organization=organization, employee_id=employee_id).exists():
         raise ConflictError('An employee with this employee ID already exists.')
+
+    department_record = _resolve_department(organization, data.get('department_record_id'))
+    team = _resolve_team(organization, data.get('team_id'))
+    designation = _resolve_designation(organization, data.get('designation_id'))
+    manager_employee = _resolve_manager(organization, data.get('manager_employee_id'))
+    _validate_relationships(department_record, team)
+
+    department_name = _clean_text(data.get('department')) or (department_record.name if department_record else '')
+    position = _clean_text(data.get('position')) or (designation.title if designation else '')
+    manager_name = _clean_text(data.get('manager')) or _display_employee_name(manager_employee)
 
     return Employee.objects.create(
         organization=organization,
         employee_id=employee_id,
-        first_name=data['first_name'].strip(),
-        last_name=data['last_name'].strip(),
+        first_name=_clean_text(data['first_name']),
+        last_name=_clean_text(data['last_name']),
         email=email,
-        phone=(data.get('phone') or '').strip(),
-        department=(data.get('department') or '').strip(),
-        position=(data.get('position') or '').strip(),
+        phone=_clean_text(data.get('phone')),
+        department=department_name,
+        department_record=department_record,
+        team=team,
+        position=position,
+        designation=designation,
         status=_clean_status(data.get('status')),
-        gender=(data.get('gender') or '').strip(),
-        country=(data.get('country') or '').strip(),
+        gender=_clean_text(data.get('gender')),
+        country=_clean_text(data.get('country')),
         hire_date=_clean_date(data.get('hire_date'), 'Hire date'),
         date_of_birth=_clean_date(data.get('date_of_birth'), 'Date of birth'),
         salary=_clean_salary(data.get('salary')),
-        avatar=(data.get('avatar') or '').strip(),
-        manager=(data.get('manager') or '').strip(),
+        avatar=_clean_text(data.get('avatar')),
+        manager=manager_name,
+        manager_employee=manager_employee,
     )
 
 
@@ -142,7 +226,7 @@ def update_employee(user, employee_pk, data):
     employee = get_employee(user, employee_pk)
 
     if 'email' in data:
-        email = (data['email'] or '').strip().lower()
+        email = _clean_text(data['email']).lower()
         _validate_email_address(email)
         duplicate = Employee.objects.filter(
             organization=employee.organization, email=email
@@ -152,7 +236,7 @@ def update_employee(user, employee_pk, data):
         employee.email = email
 
     if 'employee_id' in data:
-        employee_id = (data['employee_id'] or '').strip()
+        employee_id = _clean_text(data['employee_id'])
         if not employee_id:
             raise ValidationError('Employee ID cannot be empty.')
         duplicate = Employee.objects.filter(
@@ -164,14 +248,40 @@ def update_employee(user, employee_pk, data):
 
     for field in ('first_name', 'last_name'):
         if field in data:
-            value = (data[field] or '').strip()
+            value = _clean_text(data[field])
             if not value:
                 raise ValidationError(f'{field.replace("_", " ").capitalize()} cannot be empty.')
             setattr(employee, field, value)
 
-    for field in ('phone', 'department', 'position', 'gender', 'country', 'avatar', 'manager'):
+    for field in ('phone', 'gender', 'country', 'avatar'):
         if field in data:
-            setattr(employee, field, (data[field] or '').strip())
+            setattr(employee, field, _clean_text(data[field]))
+
+    if 'department_record_id' in data:
+        employee.department_record = _resolve_department(employee.organization, data.get('department_record_id'))
+    if 'team_id' in data:
+        employee.team = _resolve_team(employee.organization, data.get('team_id'))
+    if 'designation_id' in data:
+        employee.designation = _resolve_designation(employee.organization, data.get('designation_id'))
+    if 'manager_employee_id' in data:
+        employee.manager_employee = _resolve_manager(employee.organization, data.get('manager_employee_id'), current_employee=employee)
+
+    _validate_relationships(employee.department_record, employee.team)
+
+    if 'department' in data:
+        employee.department = _clean_text(data['department'])
+    elif 'department_record_id' in data:
+        employee.department = employee.department_record.name if employee.department_record else ''
+
+    if 'position' in data:
+        employee.position = _clean_text(data['position'])
+    elif 'designation_id' in data:
+        employee.position = employee.designation.title if employee.designation else ''
+
+    if 'manager' in data:
+        employee.manager = _clean_text(data['manager'])
+    elif 'manager_employee_id' in data:
+        employee.manager = _display_employee_name(employee.manager_employee)
 
     if 'status' in data:
         employee.status = _clean_status(data['status'])

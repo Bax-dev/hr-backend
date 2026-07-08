@@ -16,6 +16,7 @@ LOCAL_APPS = [
     'hr_app_backend.departments',
     'hr_app_backend.employees',
     'hr_app_backend.leave',
+    'hr_app_backend.talent',
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
