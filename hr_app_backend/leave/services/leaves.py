@@ -1,10 +1,12 @@
 import datetime
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 
 from hr_app_backend.utils import local_now
 from hr_app_backend.utils.errors import NotFoundError, PermissionDeniedError, ValidationError
 
+from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.employees.models import Employee
 
 from ..models import LeaveRequest
@@ -56,8 +58,27 @@ def _calculate_days(start_date, end_date):
 def _get_employee(organization, employee_pk):
     try:
         return Employee.objects.get(organization=organization, pk=employee_pk)
-    except Employee.DoesNotExist as exc:
+    except (Employee.DoesNotExist, DjangoValidationError, ValueError) as exc:
         raise NotFoundError('Employee not found.') from exc
+
+
+def _resolve_employee(user, organization, data):
+    """Determine which employee a leave request is for.
+
+    Individual accounts can only file leave for themselves, so the employee is
+    taken from their linked profile rather than trusting the client-supplied id
+    (which is the integer user id, not the employee UUID).
+    """
+    profile = getattr(user, 'profile', None)
+    account_type = getattr(profile, 'account_type', None)
+
+    if account_type == UserProfile.ACCOUNT_TYPE_INDIVIDUAL:
+        employee = getattr(profile, 'employee', None)
+        if employee is None:
+            raise ValidationError('Your account is not linked to an employee record yet.')
+        return employee
+
+    return _get_employee(organization, data['employee_id'])
 
 
 def list_leaves(user, status=None, employee_id=None):
@@ -88,7 +109,7 @@ def create_leave(user, data):
         if not (data.get(field) or '').strip():
             raise ValidationError(f'{field.replace("_", " ").capitalize()} is required.')
 
-    employee = _get_employee(organization, data['employee_id'])
+    employee = _resolve_employee(user, organization, data)
     start_date = _clean_date(data['start_date'], 'Start date')
     end_date = _clean_date(data['end_date'], 'End date')
 

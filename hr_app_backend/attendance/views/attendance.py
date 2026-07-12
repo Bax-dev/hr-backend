@@ -15,6 +15,8 @@ from ..serializers import (
 from ..services import (
     check_in,
     check_out,
+    create_location,
+    deactivate_location,
     get_location,
     list_attendance,
     list_locations,
@@ -42,10 +44,16 @@ def attendance_view(request):
 
 
 @csrf_exempt
-@require_http_methods(['GET'])
+@require_http_methods(['GET', 'POST'])
 def locations_view(request):
     try:
         user = require_user(request)
+        if request.method == 'POST':
+            payload = office_location_payload(parse_json_body(request))
+            location = create_location(user, payload)
+            return JsonResponse(
+                {'success': True, 'data': {'location': serialize_office_location(location)}}, status=201
+            )
         locations = list_locations(user)
         return JsonResponse(
             {'success': True, 'data': {'locations': [serialize_office_location(location) for location in locations]}}
@@ -55,10 +63,13 @@ def locations_view(request):
 
 
 @csrf_exempt
-@require_http_methods(['GET', 'PUT', 'PATCH'])
+@require_http_methods(['GET', 'PUT', 'PATCH', 'DELETE'])
 def location_detail_view(request, location_pk):
     try:
         user = require_user(request)
+        if request.method == 'DELETE':
+            deactivate_location(user, location_pk)
+            return JsonResponse({'success': True, 'message': 'Location removed successfully.'})
         if request.method == 'GET':
             location = get_location(user, location_pk)
         else:

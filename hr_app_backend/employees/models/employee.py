@@ -62,6 +62,11 @@ class Employee(TimeStampedModel):
         on_delete=models.SET_NULL,
         related_name='direct_reports',
     )
+    # Tracks how many times the employee has self-edited their profile in the
+    # current calendar month (period stored as 'YYYY-MM'). Used to enforce a
+    # monthly self-service edit limit from the staff portal.
+    self_edits_used = models.PositiveIntegerField(default=0)
+    self_edits_period = models.CharField(max_length=7, blank=True)
 
     class Meta:
         ordering = ['first_name', 'last_name']

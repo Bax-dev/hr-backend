@@ -2,8 +2,11 @@ from .employees import (
     create_employee,
     delete_employee,
     get_employee,
+    get_my_employee,
     list_employees,
+    my_employee_profile,
     update_employee,
+    update_my_employee,
 )
 from .people import (
     build_organization_chart,
@@ -52,6 +55,7 @@ __all__ = [
     'delete_employment_history',
     'delete_team',
     'get_employee',
+    'get_my_employee',
     'list_custom_fields',
     'list_designations',
     'list_emergency_contacts',
@@ -59,11 +63,13 @@ __all__ = [
     'list_employees',
     'list_employment_history',
     'list_teams',
+    'my_employee_profile',
     'update_custom_field',
     'update_designation',
     'update_emergency_contact',
     'update_employee',
     'update_employee_document',
     'update_employment_history',
+    'update_my_employee',
     'update_team',
 ]

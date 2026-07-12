@@ -6,15 +6,41 @@ from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
 
-from ..serializers import employee_payload, serialize_employee
+from ..serializers import (
+    employee_payload,
+    serialize_employee,
+    serialize_my_employee_profile,
+)
 from ..services import (
     create_employee,
     delete_employee,
     get_employee,
+    get_my_employee,
     list_employees,
+    my_employee_profile,
     update_employee,
+    update_my_employee,
 )
 from .helpers import require_user
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'PATCH'])
+def my_employee_view(request):
+    """View or edit the signed-in user's own employee profile (staff self-service)."""
+    try:
+        user = require_user(request)
+        if request.method == 'GET':
+            employee = get_my_employee(user)
+            profile = my_employee_profile(employee)
+            return JsonResponse({'success': True, 'data': serialize_my_employee_profile(profile)})
+
+        payload = employee_payload(parse_json_body(request), partial=True)
+        employee = update_my_employee(user, payload)
+        profile = my_employee_profile(employee)
+        return JsonResponse({'success': True, 'data': serialize_my_employee_profile(profile)})
+    except AppError as exc:
+        return error_response(exc)
 
 
 @csrf_exempt

@@ -1,4 +1,4 @@
-from .employee import serialize_employee
+from .employee import serialize_employee, serialize_my_employee_profile
 from .payloads import employee_payload
 from .people import (
     custom_field_payload,
@@ -26,6 +26,7 @@ __all__ = [
     'serialize_designation',
     'serialize_emergency_contact',
     'serialize_employee',
+    'serialize_my_employee_profile',
     'serialize_employee_document',
     'serialize_employment_history',
     'serialize_team',

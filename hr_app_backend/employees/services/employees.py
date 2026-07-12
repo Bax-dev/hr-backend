@@ -38,6 +38,20 @@ def _require_organization(user):
     return organization
 
 
+def _require_company_account(user):
+    """Require a company (admin) account for managing the employee directory.
+
+    Individual/staff accounts are self-service only: they may view and edit
+    their own record via the ``/me`` endpoints, but cannot list or access other
+    employees.
+    """
+    organization = _require_organization(user)
+    profile = getattr(user, 'profile', None)
+    if getattr(profile, 'account_type', None) != UserProfile.ACCOUNT_TYPE_COMPANY:
+        raise PermissionDeniedError('Only company administrators can manage employees.')
+    return organization
+
+
 def _validate_email_address(email):
     try:
         validate_email(email)
@@ -213,7 +227,7 @@ def _validate_relationships(department_record, team):
 
 
 def list_employees(user, search=None, department=None, status=None):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     queryset = Employee.objects.filter(organization=organization).select_related(
         'department_record',
         'team',
@@ -241,7 +255,7 @@ def list_employees(user, search=None, department=None, status=None):
 
 
 def get_employee(user, employee_pk):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     try:
         return Employee.objects.select_related(
             'department_record',
@@ -254,9 +268,119 @@ def get_employee(user, employee_pk):
         raise NotFoundError('Employee not found.') from exc
 
 
+# Fields a staff member may edit on their own profile from the portal.
+SELF_EDITABLE_FIELDS = ('first_name', 'last_name', 'email', 'phone', 'gender', 'country', 'date_of_birth')
+# Number of self-service profile edits allowed per calendar month.
+SELF_EDIT_MONTHLY_LIMIT = 3
+
+
+def _current_period():
+    return datetime.date.today().strftime('%Y-%m')
+
+
+def _edits_used_this_month(employee):
+    if employee is None:
+        return 0
+    return employee.self_edits_used if employee.self_edits_period == _current_period() else 0
+
+
+def my_employee_profile(employee):
+    """Shape the self-service profile response, including the edit quota."""
+    used = _edits_used_this_month(employee)
+    # No linked employee means there is nothing to edit, so report no quota.
+    remaining = max(SELF_EDIT_MONTHLY_LIMIT - used, 0) if employee is not None else 0
+    return {
+        'employee': employee,
+        'edits_used_this_month': used,
+        'edits_remaining_this_month': remaining,
+    }
+
+
+def get_my_employee(user):
+    """Return the employee record linked to the signed-in user, if any.
+
+    Staff accounts are provisioned with a UserProfile pointing at their
+    Employee record. Self-signed-up individuals (and company owners) have no
+    linked employee, so this returns ``None`` rather than raising.
+    """
+    profile = getattr(user, 'profile', None)
+    employee = getattr(profile, 'employee', None) if profile else None
+    if employee is None:
+        return None
+
+    return Employee.objects.select_related(
+        'department_record',
+        'team',
+        'designation',
+        'manager_employee',
+        'user_profile',
+    ).get(pk=employee.pk)
+
+
+@transaction.atomic
+def update_my_employee(user, data):
+    """Apply a staff member's own edits to their linked employee record.
+
+    Only personal fields are editable, and edits are capped per month.
+    """
+    employee = get_my_employee(user)
+    if employee is None:
+        raise NotFoundError('No employee profile is linked to this account.')
+
+    period = _current_period()
+    used = employee.self_edits_used if employee.self_edits_period == period else 0
+    if used >= SELF_EDIT_MONTHLY_LIMIT:
+        raise PermissionDeniedError(
+            f'You have reached your monthly profile edit limit of {SELF_EDIT_MONTHLY_LIMIT}.'
+        )
+
+    changed = False
+
+    if 'email' in data and data['email'] is not None:
+        email = _clean_text(data['email']).lower()
+        _validate_email_address(email)
+        duplicate = Employee.objects.filter(
+            organization=employee.organization, email=email
+        ).exclude(pk=employee.pk)
+        if duplicate.exists():
+            raise ConflictError('An employee with this email already exists.')
+        if email != employee.email:
+            employee.email = email
+            changed = True
+
+    for field in ('first_name', 'last_name'):
+        if field in data and data[field] is not None:
+            value = _clean_text(data[field])
+            if not value:
+                raise ValidationError(f'{field.replace("_", " ").capitalize()} cannot be empty.')
+            if value != getattr(employee, field):
+                setattr(employee, field, value)
+                changed = True
+
+    for field in ('phone', 'gender', 'country'):
+        if field in data and data[field] is not None:
+            value = _clean_text(data[field])
+            if value != getattr(employee, field):
+                setattr(employee, field, value)
+                changed = True
+
+    if 'date_of_birth' in data:
+        dob = _clean_date(data['date_of_birth'], 'Date of birth')
+        if dob != employee.date_of_birth:
+            employee.date_of_birth = dob
+            changed = True
+
+    if changed:
+        employee.self_edits_used = used + 1
+        employee.self_edits_period = period
+        employee.save()
+
+    return employee
+
+
 @transaction.atomic
 def create_employee(user, data):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
 
     for field in REQUIRED_FIELDS:
         if not _clean_text(data.get(field)):

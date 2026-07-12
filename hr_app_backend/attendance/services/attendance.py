@@ -142,6 +142,30 @@ def _clean_radius(value):
 
 
 @transaction.atomic
+def create_location(user, data):
+    organization = _require_organization(user)
+
+    name = str(data.get('name') or '').strip()
+    if not name:
+        raise ValidationError('Location name is required.')
+    if OfficeLocation.objects.filter(organization=organization, name__iexact=name).exists():
+        raise ConflictError('An office location with this name already exists.')
+
+    location = OfficeLocation(
+        organization=organization,
+        name=name,
+        address=str(data.get('address') or '').strip(),
+        latitude=_clean_latitude(data.get('latitude')),
+        longitude=_clean_longitude(data.get('longitude')),
+    )
+    if data.get('radius_meters') is not None:
+        location.radius_meters = _clean_radius(data['radius_meters'])
+
+    location.save()
+    return location
+
+
+@transaction.atomic
 def update_location(user, location_id, data):
     location = get_location(user, location_id)
 
@@ -160,6 +184,17 @@ def update_location(user, location_id, data):
         location.radius_meters = _clean_radius(data['radius_meters'])
 
     location.save()
+    return location
+
+
+@transaction.atomic
+def deactivate_location(user, location_id):
+    # Soft delete: attendance records reference the location via SET_NULL, so
+    # deactivating preserves historical check-in data while removing it from the
+    # active list used for check-in and settings.
+    location = get_location(user, location_id)
+    location.is_active = False
+    location.save(update_fields=['is_active', 'updated_at'])
     return location
 
 

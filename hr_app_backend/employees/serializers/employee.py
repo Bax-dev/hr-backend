@@ -1,3 +1,13 @@
+def serialize_my_employee_profile(profile):
+    """Serialize the self-service profile payload produced by my_employee_profile()."""
+    employee = profile.get('employee')
+    return {
+        'employee': serialize_employee(employee) if employee else None,
+        'edits_used_this_month': profile.get('edits_used_this_month', 0),
+        'edits_remaining_this_month': profile.get('edits_remaining_this_month', 0),
+    }
+
+
 def serialize_employee(employee):
     profile = getattr(employee, 'user_profile', None)
     return {
