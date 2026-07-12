@@ -48,6 +48,19 @@ def login_payload(payload):
     }
 
 
+def change_password_payload(payload):
+    current_password = _value(payload, 'current_password', 'currentPassword')
+    password = _value(payload, 'password')
+    confirm_password = _value(payload, 'confirm_password', 'confirmPassword')
+    if not current_password:
+        raise ValidationError('Current password is required.')
+    return {
+        'current_password': current_password,
+        'password': password,
+        'confirm_password': confirm_password,
+    }
+
+
 def forgot_password_payload(payload):
     email = _value(payload, 'email')
     if not email:

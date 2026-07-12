@@ -1,6 +1,7 @@
 from hr_app_backend.third_parties.email import EmailService, get_email_service
 from hr_app_backend.third_parties.flutterwave import FlutterwaveClient, FlutterwaveError, get_flutterwave_client
 from hr_app_backend.third_parties.paystack import PaystackClient, PaystackError, get_paystack_client
+from .email_templates import render_email_template
 
 __all__ = [
     "EmailService",
@@ -11,4 +12,5 @@ __all__ = [
     "get_email_service",
     "get_flutterwave_client",
     "get_paystack_client",
+    "render_email_template",
 ]

@@ -1,0 +1,43 @@
+{% extends "emails/base_template.html" %}
+
+{% block email_content %}
+  <p style="margin:0 0 18px;font-size:15px;line-height:1.7;color:#334155;">
+    Your employee workspace has been created in <strong style="color:#0f172a;">{{ brand_name }}</strong>.
+    Use the secure sign-in details below to access your dashboard.
+  </p>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 20px;border:1px solid #dbe4f0;border-radius:24px;background:linear-gradient(180deg,#f8fbff 0%,#eef6ff 100%);">
+    <tr>
+      <td style="padding:22px 24px;">
+        <div style="margin:0 0 10px;font-size:12px;font-weight:700;line-height:1;letter-spacing:0.14em;text-transform:uppercase;color:#0e1f9a;">
+          Sign-in details
+        </div>
+        <div style="margin:0 0 12px;font-size:14px;line-height:1.7;color:#334155;">
+          <strong style="display:inline-block;min-width:92px;color:#0f172a;">Email:</strong> {{ recipient_email }}
+        </div>
+        <div style="margin:0;font-size:14px;line-height:1.7;color:#334155;">
+          <strong style="display:inline-block;min-width:92px;color:#0f172a;">Temporary password:</strong>
+          <span style="display:inline-block;padding:6px 10px;border-radius:12px;background-color:#ffffff;border:1px solid #dbe4f0;font-weight:800;letter-spacing:0.08em;color:#0f1f4c;">{{ temporary_password }}</span>
+        </div>
+      </td>
+    </tr>
+  </table>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 20px;">
+    <tr>
+      <td align="center" style="border-radius:16px;background:linear-gradient(135deg,#0e1f9a 0%,#0b9ef6 100%);">
+        <a href="{{ login_url }}" style="display:inline-block;padding:14px 24px;font-size:14px;font-weight:800;line-height:1;text-decoration:none;color:#ffffff;">
+          Open employee workspace
+        </a>
+      </td>
+    </tr>
+  </table>
+
+  <p style="margin:0 0 12px;font-size:14px;line-height:1.7;color:#334155;">
+    The sign-in link above will prefill your email automatically. After your first successful login, you will be required to create a new password before continuing.
+  </p>
+
+  <p style="margin:0;font-size:13px;line-height:1.7;color:#64748b;">
+    If you were not expecting this invitation, contact your HR administrator immediately.
+  </p>
+{% endblock %}

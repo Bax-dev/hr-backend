@@ -1,4 +1,5 @@
 from django.contrib.auth import authenticate, get_user_model
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import transaction
 
 from ..models import Organization, UserProfile
@@ -95,4 +96,25 @@ def login_user(data):
     user = authenticate(username=email, password=password)
     if user is None:
         raise AuthenticationError('Invalid email or password.')
+    return user
+
+
+@transaction.atomic
+def change_password(user, data):
+    current_password = data.get('current_password') or ''
+    password = data.get('password') or ''
+    confirm_password = data.get('confirm_password') or ''
+
+    if not check_password(current_password, user.password):
+        raise AuthenticationError('Current password is incorrect.')
+
+    validate_passwords(password, confirm_password)
+    user.password = make_password(password)
+    user.save(update_fields=['password'])
+
+    profile = getattr(user, 'profile', None)
+    if profile and profile.must_change_password:
+        profile.must_change_password = False
+        profile.save(update_fields=['must_change_password'])
+
     return user

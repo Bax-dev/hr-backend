@@ -8,6 +8,7 @@ def _value(payload, *keys, default=''):
 DEPARTMENT_FIELDS = [
     ('name', 'name'),
     ('manager', 'manager'),
+    ('color', 'color'),
 ]
 
 

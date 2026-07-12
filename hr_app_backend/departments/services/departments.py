@@ -1,4 +1,5 @@
 from django.db import transaction
+import re
 
 from hr_app_backend.utils.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from hr_app_backend.employees.models import Employee
@@ -26,6 +27,15 @@ def _clean_manager(value):
     if len(manager) < 2:
         raise ValidationError('Manager name is required.')
     return manager
+
+
+def _clean_color(value):
+    color = (value or '').strip() or '#2563eb'
+    if not re.fullmatch(r'#[0-9a-fA-F]{6}', color):
+        raise ValidationError('A valid department color is required.')
+    return color.lower()
+
+
 def list_departments(user):
     organization = _require_organization(user)
     departments = Department.objects.filter(organization=organization).order_by('name')
@@ -52,6 +62,7 @@ def create_department(user, data):
     organization = _require_organization(user)
     name = _clean_name(data.get('name'))
     manager = _clean_manager(data.get('manager'))
+    color = _clean_color(data.get('color'))
 
     if Department.objects.filter(organization=organization, name__iexact=name).exists():
         raise ConflictError('A department with this name already exists.')
@@ -60,6 +71,7 @@ def create_department(user, data):
         organization=organization,
         name=name,
         manager=manager,
+        color=color,
     )
 
 
@@ -79,6 +91,9 @@ def update_department(user, department_pk, data):
 
     if 'manager' in data:
         department.manager = _clean_manager(data.get('manager'))
+
+    if 'color' in data:
+        department.color = _clean_color(data.get('color'))
 
     department.save()
     return department

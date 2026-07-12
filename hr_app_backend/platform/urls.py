@@ -1,0 +1,40 @@
+from django.urls import path
+
+from .views import (
+    admin_controls_view,
+    ai_features_view,
+    analytics_view,
+    approval_detail_view,
+    approvals_view,
+    communication_detail_view,
+    communications_view,
+    compliance_detail_view,
+    compliance_view,
+    dashboard_detail_view,
+    dashboards_view,
+    integration_detail_view,
+    integrations_view,
+    notification_detail_view,
+    notifications_view,
+)
+
+urlpatterns = [
+    path('approvals/', approvals_view, name='approvals'),
+    path('approvals/<uuid:record_pk>/', approval_detail_view, name='approval-detail'),
+    path('communications/', communications_view, name='communications'),
+    path('communications/<uuid:record_pk>/', communication_detail_view, name='communication-detail'),
+    path('analytics/', analytics_view, name='analytics'),
+    path('analytics/<uuid:record_pk>/', communication_detail_view, {'module': 'analytics'}, name='analytics-detail'),
+    path('compliance/', compliance_view, name='compliance'),
+    path('compliance/<uuid:record_pk>/', compliance_detail_view, name='compliance-detail'),
+    path('ai-features/', ai_features_view, name='ai-features'),
+    path('ai-features/<uuid:record_pk>/', communication_detail_view, {'module': 'ai-features'}, name='ai-feature-detail'),
+    path('notifications/', notifications_view, name='notifications'),
+    path('notifications/<uuid:record_pk>/', notification_detail_view, name='notification-detail'),
+    path('integrations/', integrations_view, name='integrations'),
+    path('integrations/<uuid:record_pk>/', integration_detail_view, name='integration-detail'),
+    path('admin-controls/', admin_controls_view, name='admin-controls'),
+    path('admin-controls/<uuid:record_pk>/', communication_detail_view, {'module': 'admin-controls'}, name='admin-control-detail'),
+    path('dashboards/', dashboards_view, name='dashboards'),
+    path('dashboards/<uuid:record_pk>/', dashboard_detail_view, name='dashboard-detail'),
+]

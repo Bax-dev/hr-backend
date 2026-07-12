@@ -6,8 +6,20 @@ from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
 
-from ..serializers import punch_payload, serialize_attendance_record, serialize_office_location
-from ..services import check_in, check_out, list_attendance, list_locations
+from ..serializers import (
+    office_location_payload,
+    punch_payload,
+    serialize_attendance_record,
+    serialize_office_location,
+)
+from ..services import (
+    check_in,
+    check_out,
+    get_location,
+    list_attendance,
+    list_locations,
+    update_location,
+)
 from .helpers import require_user
 
 
@@ -38,6 +50,21 @@ def locations_view(request):
         return JsonResponse(
             {'success': True, 'data': {'locations': [serialize_office_location(location) for location in locations]}}
         )
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'PUT', 'PATCH'])
+def location_detail_view(request, location_pk):
+    try:
+        user = require_user(request)
+        if request.method == 'GET':
+            location = get_location(user, location_pk)
+        else:
+            payload = office_location_payload(parse_json_body(request), partial=True)
+            location = update_location(user, location_pk, payload)
+        return JsonResponse({'success': True, 'data': {'location': serialize_office_location(location)}})
     except AppError as exc:
         return error_response(exc)
 

@@ -25,6 +25,7 @@ EMPLOYEE_FIELDS = [
     ('avatar', 'avatar'),
     ('manager', 'manager'),
     ('manager_employee_id', 'manager_employee_id', 'managerEmployeeId', 'managerId'),
+    ('send_invite', 'send_invite', 'sendInvite'),
 ]
 
 

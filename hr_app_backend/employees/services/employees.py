@@ -1,11 +1,19 @@
 import datetime
 import decimal
+import secrets
+import string
+from urllib.parse import urlencode
 
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Q
 
+from hr_app_backend.authentication.models import UserProfile
+from hr_app_backend.services import render_email_template
+from hr_app_backend.third_parties import get_email_service
+from hr_app_backend.utils import get_env
 from hr_app_backend.departments.models import Department
 from hr_app_backend.utils.errors import (
     ConflictError,
@@ -16,7 +24,10 @@ from hr_app_backend.utils.errors import (
 
 from ..models import Designation, Employee, Team
 
+User = get_user_model()
 REQUIRED_FIELDS = ('first_name', 'last_name', 'email')
+TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits
+DEFAULT_LOGIN_URL = 'http://localhost:5173/login'
 
 
 def _require_organization(user):
@@ -68,10 +79,82 @@ def _clean_text(value):
     return (value or '').strip()
 
 
+def _clean_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value in (None, ''):
+        return False
+    return str(value).strip().lower() in {'1', 'true', 'yes', 'on'}
+
+
 def _display_employee_name(employee):
     if employee is None:
         return ''
     return f'{employee.first_name} {employee.last_name}'.strip()
+
+
+def _generate_temporary_password(length=12):
+    return ''.join(secrets.choice(TEMP_PASSWORD_ALPHABET) for _ in range(length))
+
+
+def _build_login_url(email):
+    base_url = get_env('FRONTEND_LOGIN_URL', DEFAULT_LOGIN_URL).strip() or DEFAULT_LOGIN_URL
+    separator = '&' if '?' in base_url else '?'
+    return f'{base_url}{separator}{urlencode({"email": email})}'
+
+
+def _send_employee_invite_email(*, employee, temporary_password):
+    login_url = _build_login_url(employee.email)
+    html_body = render_email_template(
+        'emails/employee_invite.html',
+        {
+            'email_title': 'Your Workiva employee account is ready',
+            'email_eyebrow': 'Employee Access',
+            'email_heading': 'Your employee account is ready',
+            'email_intro': 'Sign in with the details below to access your workspace, review your profile, and complete your first-password update.',
+            'recipient_email': employee.email,
+            'temporary_password': temporary_password,
+            'login_url': login_url,
+        },
+    )
+    text_body = (
+        f'Your Workiva employee account is ready.\n\n'
+        f'Email: {employee.email}\n'
+        f'Temporary password: {temporary_password}\n'
+        f'Login: {login_url}\n\n'
+        f'You will be required to change your password immediately after you sign in.'
+    )
+    get_email_service().send_mail(
+        subject='Your Workiva employee account is ready',
+        body=text_body,
+        html_body=html_body,
+        to_emails=[employee.email],
+    )
+
+
+def _create_employee_user_account(*, employee):
+    if User.objects.filter(email=employee.email).exists():
+        raise ConflictError('A user account with this employee email already exists.')
+
+    temporary_password = _generate_temporary_password()
+    user = User.objects.create_user(
+        username=employee.email,
+        email=employee.email,
+        password=temporary_password,
+        first_name=employee.first_name,
+        last_name=employee.last_name,
+    )
+    UserProfile.objects.create(
+        user=user,
+        account_type=UserProfile.ACCOUNT_TYPE_INDIVIDUAL,
+        full_name=_display_employee_name(employee),
+        phone=employee.phone,
+        organization=employee.organization,
+        employee=employee,
+        must_change_password=True,
+    )
+    _send_employee_invite_email(employee=employee, temporary_password=temporary_password)
+    return user
 
 
 def _next_employee_id(organization):
@@ -136,6 +219,7 @@ def list_employees(user, search=None, department=None, status=None):
         'team',
         'designation',
         'manager_employee',
+        'user_profile',
     )
 
     if search:
@@ -164,6 +248,7 @@ def get_employee(user, employee_pk):
             'team',
             'designation',
             'manager_employee',
+            'user_profile',
         ).get(organization=organization, pk=employee_pk)
     except Employee.DoesNotExist as exc:
         raise NotFoundError('Employee not found.') from exc
@@ -182,6 +267,8 @@ def create_employee(user, data):
 
     if Employee.objects.filter(organization=organization, email=email).exists():
         raise ConflictError('An employee with this email already exists.')
+    if _clean_bool(data.get('send_invite')) and User.objects.filter(email=email).exists():
+        raise ConflictError('A user account with this employee email already exists.')
 
     employee_id = _clean_text(data.get('employee_id')) or _next_employee_id(organization)
     if Employee.objects.filter(organization=organization, employee_id=employee_id).exists():
@@ -197,7 +284,7 @@ def create_employee(user, data):
     position = _clean_text(data.get('position')) or (designation.title if designation else '')
     manager_name = _clean_text(data.get('manager')) or _display_employee_name(manager_employee)
 
-    return Employee.objects.create(
+    employee = Employee.objects.create(
         organization=organization,
         employee_id=employee_id,
         first_name=_clean_text(data['first_name']),
@@ -219,6 +306,9 @@ def create_employee(user, data):
         manager=manager_name,
         manager_employee=manager_employee,
     )
+    if _clean_bool(data.get('send_invite')):
+        _create_employee_user_account(employee=employee)
+    return employee
 
 
 @transaction.atomic

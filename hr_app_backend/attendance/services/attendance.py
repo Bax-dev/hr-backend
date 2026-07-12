@@ -103,6 +103,66 @@ def list_locations(user):
     return OfficeLocation.objects.filter(organization=organization, is_active=True)
 
 
+def get_location(user, location_id):
+    organization = _require_organization(user)
+    location = OfficeLocation.objects.filter(organization=organization, id=location_id).first()
+    if location is None:
+        raise NotFoundError('Location not found.')
+    return location
+
+
+def _clean_latitude(value):
+    try:
+        latitude = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError('Latitude must be a number.') from exc
+    if not -90 <= latitude <= 90:
+        raise ValidationError('Latitude must be between -90 and 90.')
+    return latitude
+
+
+def _clean_longitude(value):
+    try:
+        longitude = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError('Longitude must be a number.') from exc
+    if not -180 <= longitude <= 180:
+        raise ValidationError('Longitude must be between -180 and 180.')
+    return longitude
+
+
+def _clean_radius(value):
+    try:
+        radius = int(float(value))
+    except (TypeError, ValueError) as exc:
+        raise ValidationError('Radius must be a number.') from exc
+    if radius <= 0:
+        raise ValidationError('Radius must be greater than zero.')
+    return radius
+
+
+@transaction.atomic
+def update_location(user, location_id, data):
+    location = get_location(user, location_id)
+
+    if data.get('name') is not None:
+        name = str(data['name']).strip()
+        if not name:
+            raise ValidationError('Location name is required.')
+        location.name = name
+    if data.get('address') is not None:
+        location.address = str(data['address']).strip()
+    if data.get('latitude') is not None:
+        location.latitude = _clean_latitude(data['latitude'])
+    if data.get('longitude') is not None:
+        location.longitude = _clean_longitude(data['longitude'])
+    if data.get('radius_meters') is not None:
+        location.radius_meters = _clean_radius(data['radius_meters'])
+
+    location.save()
+    return location
+
+
 @transaction.atomic
 def check_in(user, data):
     organization = _require_organization(user)

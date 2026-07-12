@@ -1,4 +1,5 @@
 from .auth import (
+    change_password_payload,
     company_signup_payload,
     forgot_password_payload,
     individual_signup_payload,
@@ -10,6 +11,7 @@ from .auth import (
 from .user import serialize_organization, serialize_user
 
 __all__ = [
+    'change_password_payload',
     'company_signup_payload',
     'forgot_password_payload',
     'individual_signup_payload',

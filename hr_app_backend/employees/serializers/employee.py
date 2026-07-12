@@ -1,4 +1,5 @@
 def serialize_employee(employee):
+    profile = getattr(employee, 'user_profile', None)
     return {
         'id': employee.id,
         'employee_id': employee.employee_id,
@@ -27,4 +28,5 @@ def serialize_employee(employee):
             if employee.manager_employee
             else None
         ),
+        'has_portal_access': profile is not None,
     }
