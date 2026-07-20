@@ -3,7 +3,7 @@ from functools import wraps
 from django.core.cache import cache
 from django.http import JsonResponse
 
-from .errors import AppError
+from .errors import AppError, error_payload
 
 _PERIODS = {
     'sec': 1,
@@ -90,10 +90,7 @@ def throttle_view(scope, rate, ident=None):
             try:
                 throttle(request, scope=scope, rate=rate, ident=ident)
             except ThrottledError as exc:
-                return JsonResponse(
-                    {'success': False, 'message': exc.message},
-                    status=exc.status_code,
-                )
+                return JsonResponse(error_payload(exc), status=exc.status_code)
             return view(request, *args, **kwargs)
 
         return wrapper

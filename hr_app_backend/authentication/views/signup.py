@@ -3,6 +3,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import company_signup_payload, individual_signup_payload
 from ..services import auth_response, register_company, register_individual
@@ -11,6 +13,8 @@ from .helpers import error_response, load_json
 
 @csrf_exempt
 @require_POST
+@throttle_view('auth:signup', '5/min')
+@idempotent('auth:signup:company')
 def signup_company_view(request):
     try:
         user = register_company(company_signup_payload(load_json(request)))
@@ -21,6 +25,8 @@ def signup_company_view(request):
 
 @csrf_exempt
 @require_POST
+@throttle_view('auth:signup', '5/min')
+@idempotent('auth:signup:individual')
 def signup_individual_view(request):
     try:
         user = register_individual(individual_signup_payload(load_json(request)))

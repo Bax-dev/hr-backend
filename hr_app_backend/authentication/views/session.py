@@ -3,6 +3,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
 from hr_app_backend.utils.errors import AppError, AuthenticationError
+from hr_app_backend.utils.throttles import throttle, throttle_view
 
 from ..serializers import serialize_user
 from ..serializers import change_password_payload, login_payload
@@ -12,9 +13,14 @@ from .helpers import error_response, load_json, token_from_request
 
 @csrf_exempt
 @require_POST
+@throttle_view('auth:login:ip', '20/min')
 def login_view(request):
     try:
-        user = login_user(login_payload(load_json(request)))
+        payload = login_payload(load_json(request))
+        # The per-IP limit above does not stop credential stuffing spread across
+        # many IPs, so also cap attempts against a single account.
+        throttle(request, scope='auth:login:account', rate='10/min', ident=payload['email'].lower())
+        user = login_user(payload)
         return JsonResponse({'success': True, 'data': auth_response(user)})
     except AppError as exc:
         return error_response(exc)
@@ -38,6 +44,7 @@ def logout_view(request):
 
 @csrf_exempt
 @require_POST
+@throttle_view('auth:change-password', '10/min')
 def change_password_view(request):
     try:
         token = token_from_request(request)

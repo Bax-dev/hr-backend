@@ -3,6 +3,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import initialize_subscription_payload, serialize_subscription, verify_subscription_payload
 from ..services import initialize_subscription_payment, verify_subscription_payment
@@ -11,6 +13,11 @@ from .helpers import error_response, load_json, require_authenticated_user
 
 @csrf_exempt
 @require_POST
+@throttle_view('billing:initialize', '20/min')
+# A retried checkout must not open a second payment session. Flip this to
+# required=True once every client is known to send the header — doing so now
+# would reject in-flight builds that predate it.
+@idempotent('billing:initialize')
 def initialize_subscription_payment_view(request):
     try:
         user = require_authenticated_user(request)
@@ -33,6 +40,8 @@ def initialize_subscription_payment_view(request):
 
 @csrf_exempt
 @require_POST
+@throttle_view('billing:verify', '30/min')
+@idempotent('billing:verify')
 def verify_subscription_payment_view(request):
     try:
         user = require_authenticated_user(request)

@@ -5,6 +5,9 @@ from django.views.decorators.http import require_http_methods
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.pagination import paginated_data
+from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import (
     office_location_payload,
@@ -36,9 +39,10 @@ def attendance_view(request):
             status=request.GET.get('status'),
             employee_id=request.GET.get('employee_id') or request.GET.get('employeeId'),
         )
-        return JsonResponse(
-            {'success': True, 'data': {'records': [serialize_attendance_record(record) for record in records]}}
-        )
+        return JsonResponse({
+            'success': True,
+            'data': paginated_data(request, records, serialize_attendance_record, key='records'),
+        })
     except AppError as exc:
         return error_response(exc)
 
@@ -82,6 +86,9 @@ def location_detail_view(request, location_pk):
 
 @csrf_exempt
 @require_http_methods(['POST'])
+@throttle_view('attendance:punch', '30/min')
+# A double-tap on a flaky connection must not create a second punch.
+@idempotent('attendance:check-in')
 def check_in_view(request):
     try:
         user = require_user(request)
@@ -93,6 +100,8 @@ def check_in_view(request):
 
 @csrf_exempt
 @require_http_methods(['POST'])
+@throttle_view('attendance:punch', '30/min')
+@idempotent('attendance:check-out')
 def check_out_view(request):
     try:
         user = require_user(request)

@@ -2,7 +2,7 @@ from django.db import transaction
 
 from hr_app_backend.utils.errors import ValidationError
 
-from ..models import LearningProgram, OffboardingPlan, OnboardingPlan, PerformanceReview
+from ..models import OffboardingPlan, OnboardingPlan, PerformanceReview
 from .helpers import clean_bool, clean_date, clean_priority, clean_status, clean_text, get_record, require_organization
 
 
@@ -119,61 +119,6 @@ def update_performance(user, record_pk, data):
 
 def delete_performance(user, record_pk):
     get_performance(user, record_pk).delete()
-
-
-def list_learning(user):
-    return _list_records(user, LearningProgram)
-
-
-def get_learning(user, record_pk):
-    organization = require_organization(user)
-    return get_record(LearningProgram, organization, record_pk, 'Learning program')
-
-
-@transaction.atomic
-def create_learning(user, data):
-    organization = require_organization(user)
-    program_name = clean_text(data.get('program_name'))
-    audience = clean_text(data.get('audience'))
-    owner = clean_text(data.get('owner'))
-    if len(program_name) < 2:
-        raise ValidationError('Program name is required.')
-    if len(audience) < 2:
-        raise ValidationError('Audience is required.')
-    if len(owner) < 2:
-        raise ValidationError('Owner is required.')
-    return LearningProgram.objects.create(
-        organization=organization,
-        program_name=program_name,
-        audience=audience,
-        owner=owner,
-        priority=clean_priority(data.get('priority')),
-        status=clean_status(data.get('status'), default='draft'),
-        notes=clean_text(data.get('notes')),
-    )
-
-
-@transaction.atomic
-def update_learning(user, record_pk, data):
-    record = get_learning(user, record_pk)
-    if 'program_name' in data:
-        record.program_name = clean_text(data.get('program_name'))
-    if 'audience' in data:
-        record.audience = clean_text(data.get('audience'))
-    if 'owner' in data:
-        record.owner = clean_text(data.get('owner'))
-    if 'priority' in data:
-        record.priority = clean_priority(data.get('priority'))
-    if 'status' in data:
-        record.status = clean_status(data.get('status'), default='draft')
-    if 'notes' in data:
-        record.notes = clean_text(data.get('notes'))
-    record.save()
-    return record
-
-
-def delete_learning(user, record_pk):
-    get_learning(user, record_pk).delete()
 
 
 def list_offboarding(user):

@@ -5,6 +5,9 @@ from django.views.decorators.http import require_http_methods
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.pagination import paginated_data
+from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import leave_payload, serialize_leave
 from ..services import create_leave, get_leave, list_leaves, update_leave
@@ -13,6 +16,8 @@ from .helpers import require_user
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
+@throttle_view('leave:write', '120/min')
+@idempotent('leave:create')
 def leaves_view(request):
     try:
         user = require_user(request)
@@ -22,7 +27,10 @@ def leaves_view(request):
                 status=request.GET.get('status'),
                 employee_id=request.GET.get('employee_id') or request.GET.get('employeeId'),
             )
-            return JsonResponse({'success': True, 'data': {'leaves': [serialize_leave(leave) for leave in leaves]}})
+            return JsonResponse({
+                'success': True,
+                'data': paginated_data(request, leaves, serialize_leave, key='leaves'),
+            })
 
         payload = leave_payload(parse_json_body(request))
         leave = create_leave(user, payload)

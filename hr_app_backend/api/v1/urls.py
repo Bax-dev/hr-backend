@@ -1,6 +1,6 @@
 from django.urls import include, path
 
-from .views import health_check
+from .views import health_check, upload_presign_view
 
 app_name = "v1"
 
@@ -14,6 +14,7 @@ urlpatterns = [
     path('talent/', include('hr_app_backend.talent.urls')),
     path('people/', include('hr_app_backend.people.urls')),
     path('settings/', include('hr_app_backend.workspace_settings.urls')),
+    path('uploads/presign/', upload_presign_view, name='upload-presign'),
     path('', include('hr_app_backend.platform.urls')),
     path("health/", health_check, name="health-check"),
 ]

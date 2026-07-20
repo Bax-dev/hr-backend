@@ -1,4 +1,5 @@
 import json
+from http import HTTPStatus
 
 from django.http import JsonResponse
 
@@ -22,4 +23,22 @@ def token_from_request(request):
 
 
 def error_response(error):
-    return JsonResponse({'success': False, 'message': error.message}, status=error.status_code)
+    status = int(getattr(error, 'status_code', 400) or 400)
+    try:
+        status_title = HTTPStatus(status).phrase
+    except ValueError:
+        status_title = 'Request Error'
+
+    detail = str(getattr(error, 'message', '') or 'Something went wrong. Please try again.').strip()
+
+    return JsonResponse(
+        {
+            'success': False,
+            'statusCode': status,
+            'status': status_title,
+            'message': detail,
+            'detail': detail,
+            'error': status_title.lower().replace(' ', '_'),
+        },
+        status=status,
+    )

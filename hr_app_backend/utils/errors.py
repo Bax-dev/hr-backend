@@ -1,3 +1,6 @@
+from http import HTTPStatus
+
+
 class AppError(Exception):
     status_code = 400
     default_message = 'An application error occurred.'
@@ -13,7 +16,7 @@ class BadRequestError(AppError):
 
 
 class ValidationError(BadRequestError):
-    default_message = 'Submitted data is invalid.'
+    default_message = 'Please review the submitted information and try again.'
 
 
 class AuthenticationError(AppError):
@@ -39,3 +42,30 @@ class ConflictError(AppError):
 class ExternalServiceError(AppError):
     status_code = 502
     default_message = 'An external service request failed.'
+
+
+def error_payload(error):
+    """Build the standard error body for an :class:`AppError`.
+
+    Kept here rather than in the auth helpers so middleware-style utilities
+    (throttling, idempotency) can emit the exact same envelope as views do
+    without importing from an app package.
+    """
+    status = int(getattr(error, 'status_code', 400) or 400)
+    try:
+        status_title = HTTPStatus(status).phrase
+    except ValueError:
+        status_title = 'Request Error'
+
+    detail = str(
+        getattr(error, 'message', '') or 'Something went wrong. Please try again.'
+    ).strip()
+
+    return {
+        'success': False,
+        'statusCode': status,
+        'status': status_title,
+        'message': detail,
+        'detail': detail,
+        'error': status_title.lower().replace(' ', '_'),
+    }

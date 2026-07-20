@@ -8,34 +8,27 @@ from hr_app_backend.employees.views.helpers import require_user
 from hr_app_backend.utils.errors import AppError
 
 from ..serializers import (
-    learning_payload,
     offboarding_payload,
     onboarding_payload,
     performance_payload,
-    serialize_learning,
     serialize_offboarding,
     serialize_onboarding,
     serialize_performance,
 )
 from ..services import (
-    create_learning,
     create_offboarding,
     create_onboarding,
     create_performance,
-    delete_learning,
     delete_offboarding,
     delete_onboarding,
     delete_performance,
-    get_learning,
     get_offboarding,
     get_onboarding,
     get_performance,
-    list_learning,
     list_offboarding,
     list_onboarding,
     list_performance,
     talent_summary,
-    update_learning,
     update_offboarding,
     update_onboarding,
     update_performance,
@@ -106,35 +99,6 @@ def performance_detail_view(request, record_pk):
             return JsonResponse({'success': True, 'message': 'Performance review deleted successfully.'})
         record = update_performance(user, record_pk, performance_payload(parse_json_body(request), partial=True))
         return detail_response('record', record, serialize_performance)
-    except AppError as exc:
-        return error_response(exc)
-
-
-@csrf_exempt
-@require_http_methods(['GET', 'POST'])
-def learning_view(request):
-    try:
-        user = require_user(request)
-        if request.method == 'GET':
-            return collection_response('records', list_learning(user), serialize_learning)
-        record = create_learning(user, learning_payload(parse_json_body(request)))
-        return detail_response('record', record, serialize_learning, status=201)
-    except AppError as exc:
-        return error_response(exc)
-
-
-@csrf_exempt
-@require_http_methods(['GET', 'PATCH', 'DELETE'])
-def learning_detail_view(request, record_pk):
-    try:
-        user = require_user(request)
-        if request.method == 'GET':
-            return detail_response('record', get_learning(user, record_pk), serialize_learning)
-        if request.method == 'DELETE':
-            delete_learning(user, record_pk)
-            return JsonResponse({'success': True, 'message': 'Learning program deleted successfully.'})
-        record = update_learning(user, record_pk, learning_payload(parse_json_body(request), partial=True))
-        return detail_response('record', record, serialize_learning)
     except AppError as exc:
         return error_response(exc)
 

@@ -5,6 +5,8 @@ from django.views.decorators.http import require_http_methods
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import department_payload, serialize_department
 from ..services import (
@@ -19,6 +21,8 @@ from .helpers import require_user
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
+@throttle_view('departments:write', '120/min')
+@idempotent('departments:create')
 def departments_view(request):
     try:
         user = require_user(request)

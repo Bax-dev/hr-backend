@@ -1,6 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
+from django.db.models import Sum
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -8,9 +9,13 @@ from django.views.decorators.http import require_http_methods
 
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
+from hr_app_backend.attendance.models import AttendanceRecord
 from hr_app_backend.employees.models import Employee
 from hr_app_backend.employees.views.helpers import require_user
+from hr_app_backend.leave.models import LeaveRequest
 from hr_app_backend.utils.errors import AppError, NotFoundError, ValidationError
+from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.throttles import throttle_view
 
 from .models import Announcement, PayrollRecord, PlatformRecord
 
@@ -25,6 +30,16 @@ PLATFORM_MODULE_CONFIG = {
     'admin-controls': {'list_key': 'controls', 'item_key': 'control'},
     'dashboards': {'list_key': 'dashboards', 'item_key': 'dashboard'},
 }
+
+DASHBOARD_STAT_COLORS = {
+    'totalEmployees': {'accent': '#6F54FF', 'background': '#F2EDFF'},
+    'presentToday': {'accent': '#10B981', 'background': '#E9FBF3'},
+    'onLeave': {'accent': '#F59E0B', 'background': '#FFF6E7'},
+    'newHires': {'accent': '#2563EB', 'background': '#EEF4FF'},
+    'upcomingBirthdays': {'accent': '#EC4899', 'background': '#FFF0F7'},
+}
+
+DASHBOARD_DISTRIBUTION_COLORS = ['#2563EB', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899', '#0EA5E9']
 
 
 def _organization_for(request):
@@ -87,6 +102,616 @@ def _month_value(raw):
     except ValueError as exc:
         raise ValidationError('Month must be in YYYY-MM format.') from exc
     return value
+
+
+def _month_start(value):
+    return datetime.strptime(value, '%Y-%m').date().replace(day=1)
+
+
+def _month_end(value):
+    start = _month_start(value)
+    if start.month == 12:
+        return date(start.year + 1, 1, 1) - timedelta(days=1)
+    return date(start.year, start.month + 1, 1) - timedelta(days=1)
+
+
+def _week_bounds(today):
+    start = today - timedelta(days=today.weekday())
+    end = start + timedelta(days=6)
+    return start, end
+
+
+def _display_name(user):
+    profile = getattr(user, 'profile', None)
+    if profile and profile.full_name:
+        return profile.full_name.split(' ', 1)[0]
+    if user.get_full_name():
+        return user.get_full_name().split(' ', 1)[0]
+    return (user.email or 'there').split('@', 1)[0].title()
+
+
+def _format_range_label(start, end):
+    return f"{start.strftime('%d %b, %Y')} - {end.strftime('%d %b, %Y')}"
+
+
+def _format_currency(value):
+    return float(value.quantize(Decimal('0.01')))
+
+
+def _safe_percentage(part, whole):
+    if not whole:
+        return 0
+    return round((part / whole) * 100)
+
+
+def _month_delta_label(current_value, previous_value, suffix='from last month'):
+    if previous_value <= 0:
+        if current_value <= 0:
+            return ('neutral', f'0% {suffix}')
+        return ('up', f'100% {suffix}')
+    change = ((current_value - previous_value) / previous_value) * 100
+    direction = 'up' if change > 0 else 'down' if change < 0 else 'neutral'
+    return (direction, f'{abs(round(change))}% {suffix}')
+
+
+def _next_occurrence(occasion, today):
+    candidate = occasion.replace(year=today.year)
+    if candidate < today:
+        candidate = candidate.replace(year=today.year + 1)
+    return candidate
+
+
+def _birthday_events(employees, today, limit=2):
+    upcoming = []
+    for employee in employees:
+        if not employee.date_of_birth:
+            continue
+        next_date = _next_occurrence(employee.date_of_birth, today)
+        if next_date < today or next_date > today + timedelta(days=14):
+            continue
+        upcoming.append((next_date, employee))
+    upcoming.sort(key=lambda item: item[0])
+    return upcoming[:limit]
+
+
+def _leave_event_candidates(organization, today, limit=2):
+    return list(
+        LeaveRequest.objects.filter(
+            organization=organization,
+            status=LeaveRequest.STATUS_APPROVED,
+            start_date__gte=today,
+            start_date__lte=today + timedelta(days=14),
+        )
+        .select_related('employee')
+        .order_by('start_date', 'employee__first_name', 'employee__last_name')[:limit]
+    )
+
+
+def _dashboard_payroll_snapshot(employees, records):
+    if records:
+        total_payroll = sum(record.net_pay for record in records)
+        total_deductions = sum(record.deductions for record in records)
+        net_pay = total_payroll
+        processed_count = sum(1 for record in records if record.status == PayrollRecord.STATUS_PAID)
+        pending_count = len(records) - processed_count
+        total_count = len(records)
+    else:
+        total_payroll = Decimal('0')
+        total_deductions = Decimal('0')
+        for employee in employees:
+            base_salary = employee.salary or Decimal('0')
+            bonus = Decimal('3500') if employee.department.strip().lower() == 'engineering' else Decimal('1500')
+            deductions = (base_salary * Decimal('0.04')).quantize(Decimal('0.01'))
+            total_deductions += deductions
+            total_payroll += base_salary + bonus - deductions
+        net_pay = total_payroll
+        processed_count = 0
+        pending_count = len(employees)
+        total_count = len(employees)
+
+    return {
+        'totalPayroll': _format_currency(total_payroll),
+        'totalDeductions': _format_currency(total_deductions),
+        'netPay': _format_currency(net_pay),
+        'processedPercent': _safe_percentage(processed_count, total_count),
+        'pendingPercent': _safe_percentage(pending_count, total_count),
+    }
+
+
+def _dashboard_overview_payload(user, organization):
+    today = timezone.localdate()
+    week_start, week_end = _week_bounds(today)
+    current_month = today.strftime('%Y-%m')
+    previous_month_date = (today.replace(day=1) - timedelta(days=1))
+    previous_month = previous_month_date.strftime('%Y-%m')
+    month_start = _month_start(current_month)
+    month_end = _month_end(current_month)
+
+    active_employees = list(
+        Employee.objects.filter(organization=organization).exclude(status=Employee.STATUS_TERMINATED)
+    )
+    employees_by_id = {employee.id: employee for employee in active_employees}
+    employee_count = len(active_employees)
+
+    attendance_today = list(
+        AttendanceRecord.objects.filter(
+            organization=organization,
+            date=today,
+            employee_id__in=employees_by_id.keys(),
+        ).select_related('employee')
+    )
+    weekly_attendance = list(
+        AttendanceRecord.objects.filter(
+            organization=organization,
+            date__range=(week_start, week_end),
+            employee_id__in=employees_by_id.keys(),
+        )
+    )
+    current_leaves = list(
+        LeaveRequest.objects.filter(
+            organization=organization,
+            status=LeaveRequest.STATUS_APPROVED,
+            start_date__lte=today,
+            end_date__gte=today,
+            employee_id__in=employees_by_id.keys(),
+        ).select_related('employee')
+    )
+    monthly_leaves = list(
+        LeaveRequest.objects.filter(
+            organization=organization,
+            status=LeaveRequest.STATUS_APPROVED,
+            start_date__lte=month_end,
+            end_date__gte=month_start,
+            employee_id__in=employees_by_id.keys(),
+        ).select_related('employee')
+    )
+    pending_leave_count = LeaveRequest.objects.filter(
+        organization=organization,
+        status=LeaveRequest.STATUS_PENDING,
+        employee_id__in=employees_by_id.keys(),
+    ).count()
+
+    present_today = sum(
+        1
+        for record in attendance_today
+        if record.status in {AttendanceRecord.STATUS_PRESENT, AttendanceRecord.STATUS_LATE, AttendanceRecord.STATUS_EARLY_DEPARTURE}
+    )
+    remote_today = sum(1 for record in attendance_today if record.location_id is None)
+    on_leave_count = len({leave.employee_id for leave in current_leaves})
+    absent_today = max(employee_count - present_today - on_leave_count, 0)
+
+    new_hires_this_month = sum(
+        1 for employee in active_employees if employee.hire_date and employee.hire_date.year == today.year and employee.hire_date.month == today.month
+    )
+    new_hires_last_month = sum(
+        1
+        for employee in active_employees
+        if employee.hire_date and employee.hire_date.year == previous_month_date.year and employee.hire_date.month == previous_month_date.month
+    )
+    new_hires_direction, new_hires_note = _month_delta_label(new_hires_this_month, new_hires_last_month)
+
+    current_birthdays = sum(
+        1
+        for employee in active_employees
+        if employee.date_of_birth
+        and today <= _next_occurrence(employee.date_of_birth, today) <= today + timedelta(days=6)
+    )
+
+    active_ids = {employee.id for employee in active_employees}
+    previous_month_total = Employee.objects.filter(
+        organization=organization,
+        created_at__lt=month_start,
+    ).exclude(status=Employee.STATUS_TERMINATED).count()
+    total_direction, total_note = _month_delta_label(employee_count, previous_month_total)
+
+    weekly_series = []
+    weekly_present = weekly_absent = weekly_late = weekly_half_day = 0
+    records_by_day = {week_start + timedelta(days=offset): [] for offset in range(7)}
+    for record in weekly_attendance:
+        records_by_day.setdefault(record.date, []).append(record)
+
+    for day, records in records_by_day.items():
+        present_count = sum(1 for record in records if record.status == AttendanceRecord.STATUS_PRESENT)
+        late_count = sum(1 for record in records if record.status == AttendanceRecord.STATUS_LATE)
+        half_day_count = sum(1 for record in records if record.status == AttendanceRecord.STATUS_EARLY_DEPARTURE)
+        attended_count = present_count + late_count + half_day_count
+        absent_count = max(employee_count - attended_count, 0)
+        weekly_present += present_count
+        weekly_absent += absent_count
+        weekly_late += late_count
+        weekly_half_day += half_day_count
+        weekly_series.append({'day': day.strftime('%a'), 'value': attended_count})
+
+    leave_type_map = {
+        LeaveRequest.TYPE_ANNUAL: 'Annual Leave',
+        LeaveRequest.TYPE_SICK: 'Sick Leave',
+        LeaveRequest.TYPE_MATERNITY: 'Maternity Leave',
+        LeaveRequest.TYPE_COMPASSIONATE: 'Compassionate Leave',
+        LeaveRequest.TYPE_UNPAID: 'Unpaid Leave',
+        LeaveRequest.TYPE_OTHER: 'Other Leave',
+    }
+    leave_color_map = {
+        'Annual Leave': '#2563EB',
+        'Sick Leave': '#10B981',
+        'Casual Leave': '#F59E0B',
+        'Maternity Leave': '#8B5CF6',
+        'Other Leave': '#EC4899',
+        'Compassionate Leave': '#F97316',
+        'Unpaid Leave': '#64748B',
+    }
+    leave_totals = {}
+    for leave in monthly_leaves:
+        label = leave_type_map.get(leave.leave_type, 'Other Leave')
+        if label == 'Compassionate Leave':
+            label = 'Other Leave'
+        leave_totals[label] = leave_totals.get(label, 0) + int(leave.days or 0)
+    leave_breakdown = [
+        {'name': name, 'value': value, 'color': leave_color_map.get(name, '#94A3B8')}
+        for name, value in sorted(leave_totals.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    total_leaves = sum(item['value'] for item in leave_breakdown)
+
+    recent_employees = [
+        {
+            'id': str(employee.id),
+            'name': f'{employee.first_name} {employee.last_name}'.strip(),
+            'role': employee.position or 'Employee',
+            'status': 'Active' if employee.status == Employee.STATUS_ACTIVE else employee.status.replace('_', ' ').title(),
+            'joinedDate': employee.hire_date.isoformat() if employee.hire_date else employee.created_at.date().isoformat(),
+            'initials': f"{(employee.first_name[:1] or '')}{(employee.last_name[:1] or '')}".upper() or 'NA',
+            'avatar': employee.avatar or None,
+        }
+        for employee in sorted(
+            active_employees,
+            key=lambda item: item.hire_date or item.created_at.date(),
+            reverse=True,
+        )[:4]
+    ]
+
+    current_payroll_records = list(
+        PayrollRecord.objects.filter(organization=organization, month=current_month).select_related('employee')
+    )
+    previous_payroll_records = list(PayrollRecord.objects.filter(organization=organization, month=previous_month))
+    payroll_snapshot = _dashboard_payroll_snapshot(active_employees, current_payroll_records)
+    previous_total_payroll = sum(record.net_pay for record in previous_payroll_records)
+    payroll_direction, payroll_note = _month_delta_label(
+        Decimal(str(payroll_snapshot['totalPayroll'])),
+        previous_total_payroll,
+        suffix='vs last month',
+    )
+
+    department_counts = {}
+    for employee in active_employees:
+        label = (employee.department_record.name if employee.department_record_id else employee.department) or 'Unassigned'
+        department_counts[label] = department_counts.get(label, 0) + 1
+    distribution_items = []
+    for index, (label, value) in enumerate(sorted(department_counts.items(), key=lambda item: (-item[1], item[0]))[:6]):
+        distribution_items.append({
+            'name': label,
+            'value': value,
+            'percentage': _safe_percentage(value, employee_count),
+            'color': DASHBOARD_DISTRIBUTION_COLORS[index % len(DASHBOARD_DISTRIBUTION_COLORS)],
+            'icon': 'briefcase-business',
+        })
+
+    upcoming_events = []
+    for next_date, employee in _birthday_events(active_employees, today):
+        upcoming_events.append({
+            'id': f'birthday-{employee.id}-{next_date.isoformat()}',
+            'title': f"{employee.first_name} {employee.last_name}'s Birthday",
+            'startsAt': datetime.combine(next_date, time(hour=9, minute=0), tzinfo=timezone.get_current_timezone()).isoformat(),
+            'monthLabel': next_date.strftime('%b').upper(),
+            'dayLabel': next_date.strftime('%d'),
+            'color': '#EC4899',
+        })
+    for leave in _leave_event_candidates(organization, today):
+        if len(upcoming_events) >= 3:
+            break
+        upcoming_events.append({
+            'id': f'leave-{leave.id}',
+            'title': f'{leave.employee.first_name} {leave.employee.last_name} leave starts',
+            'startsAt': datetime.combine(leave.start_date, time(hour=9, minute=0), tzinfo=timezone.get_current_timezone()).isoformat(),
+            'monthLabel': leave.start_date.strftime('%b').upper(),
+            'dayLabel': leave.start_date.strftime('%d'),
+            'color': '#10B981',
+        })
+    if len(upcoming_events) < 3:
+        payroll_processing_date = min(month_end, today + timedelta(days=10))
+        upcoming_events.append({
+            'id': f'payroll-{current_month}',
+            'title': 'Payroll Processing',
+            'startsAt': datetime.combine(payroll_processing_date, time(hour=14, minute=0), tzinfo=timezone.get_current_timezone()).isoformat(),
+            'monthLabel': payroll_processing_date.strftime('%b').upper(),
+            'dayLabel': payroll_processing_date.strftime('%d'),
+            'color': '#8B5CF6',
+        })
+    upcoming_events = sorted(upcoming_events, key=lambda item: item['startsAt'])[:3]
+
+    total_colors = DASHBOARD_STAT_COLORS['totalEmployees']
+    present_colors = DASHBOARD_STAT_COLORS['presentToday']
+    leave_colors = DASHBOARD_STAT_COLORS['onLeave']
+    hire_colors = DASHBOARD_STAT_COLORS['newHires']
+    birthday_colors = DASHBOARD_STAT_COLORS['upcomingBirthdays']
+
+    return {
+        'header': {
+            'title': 'Dashboard',
+            'subtitle': f"Welcome back, {_display_name(user)}! Here's what's happening in your organization.",
+            'dateRange': {
+                'startDate': week_start.isoformat(),
+                'endDate': week_end.isoformat(),
+                'label': _format_range_label(week_start, week_end),
+            },
+            'notificationCount': pending_leave_count,
+            'searchPlaceholder': 'Search employees, documents...',
+        },
+        'stats': [
+            {
+                'key': 'totalEmployees',
+                'title': 'Total Employees',
+                'value': str(employee_count),
+                'note': total_note,
+                'icon': 'users',
+                'accentColor': total_colors['accent'],
+                'backgroundColor': total_colors['background'],
+                'trendDirection': total_direction,
+            },
+            {
+                'key': 'presentToday',
+                'title': 'Present Today',
+                'value': str(present_today),
+                'note': f"{_safe_percentage(present_today, employee_count)}% of total employees",
+                'icon': 'user-check',
+                'accentColor': present_colors['accent'],
+                'backgroundColor': present_colors['background'],
+                'trendDirection': 'neutral',
+            },
+            {
+                'key': 'onLeave',
+                'title': 'On Leave',
+                'value': str(on_leave_count),
+                'note': f"{_safe_percentage(on_leave_count, employee_count)}% of total employees",
+                'icon': 'calendar-days',
+                'accentColor': leave_colors['accent'],
+                'backgroundColor': leave_colors['background'],
+                'trendDirection': 'neutral',
+            },
+            {
+                'key': 'newHires',
+                'title': 'New Hires (This Month)',
+                'value': str(new_hires_this_month),
+                'note': new_hires_note,
+                'icon': 'user-plus',
+                'accentColor': hire_colors['accent'],
+                'backgroundColor': hire_colors['background'],
+                'trendDirection': new_hires_direction,
+            },
+            {
+                'key': 'upcomingBirthdays',
+                'title': 'Upcoming Birthdays',
+                'value': str(current_birthdays),
+                'note': 'This week',
+                'icon': 'cake',
+                'accentColor': birthday_colors['accent'],
+                'backgroundColor': birthday_colors['background'],
+                'trendDirection': 'neutral',
+            },
+        ],
+        'attendanceOverview': {
+            'rangeLabel': 'This Week',
+            'series': weekly_series,
+            'legend': [
+                {'label': 'Present', 'value': weekly_present, 'color': '#22C55E'},
+                {'label': 'Absent', 'value': weekly_absent, 'color': '#FF5D5D'},
+                {'label': 'Late', 'value': weekly_late, 'color': '#F59E0B'},
+                {'label': 'Half Day', 'value': weekly_half_day, 'color': '#3B82F6'},
+            ],
+        },
+        'leaveSummary': {
+            'rangeLabel': 'This Month',
+            'totalLeaves': total_leaves,
+            'breakdown': leave_breakdown,
+        },
+        'upcomingEvents': upcoming_events,
+        'recentEmployees': recent_employees,
+        'payrollOverview': {
+            'rangeLabel': 'This Month',
+            'totalPayroll': payroll_snapshot['totalPayroll'],
+            'changeLabel': payroll_note,
+            'changeDirection': payroll_direction,
+            'totalDeductions': payroll_snapshot['totalDeductions'],
+            'netPay': payroll_snapshot['netPay'],
+            'processedPercent': payroll_snapshot['processedPercent'],
+            'pendingPercent': payroll_snapshot['pendingPercent'],
+        },
+        'employeeDistribution': {
+            'groupBy': 'By Department',
+            'items': distribution_items,
+        },
+        'summary': {
+            'presentToday': present_today,
+            'absentToday': absent_today,
+            'lateToday': sum(1 for record in attendance_today if record.status == AttendanceRecord.STATUS_LATE),
+            'onLeave': on_leave_count,
+            'remoteEmployees': remote_today,
+            'pendingApprovals': pending_leave_count,
+            'payrollThisMonth': payroll_snapshot['totalPayroll'],
+        },
+    }
+
+
+def _active_employee_ids(organization):
+    return list(
+        Employee.objects.filter(organization=organization)
+        .exclude(status=Employee.STATUS_TERMINATED)
+        .values_list('id', flat=True)
+    )
+
+
+def _dashboard_stats_payload(organization):
+    """Build the flat KPI block served by ``/api/dashboard/stats``.
+
+    This is the same data as ``DashboardOverview.summary`` plus
+    ``totalEmployees``, but computed with counts instead of materialising
+    every employee, so the endpoint stays cheap enough to poll.
+    """
+    today = timezone.localdate()
+    current_month = today.strftime('%Y-%m')
+    employee_ids = _active_employee_ids(organization)
+    employee_count = len(employee_ids)
+
+    attendance_today = list(
+        AttendanceRecord.objects.filter(
+            organization=organization,
+            date=today,
+            employee_id__in=employee_ids,
+        ).values_list('status', 'location_id')
+    )
+    attended_statuses = {
+        AttendanceRecord.STATUS_PRESENT,
+        AttendanceRecord.STATUS_LATE,
+        AttendanceRecord.STATUS_EARLY_DEPARTURE,
+    }
+    present_today = sum(1 for status, _ in attendance_today if status in attended_statuses)
+    late_today = sum(1 for status, _ in attendance_today if status == AttendanceRecord.STATUS_LATE)
+    remote_today = sum(1 for _, location_id in attendance_today if location_id is None)
+
+    on_leave = (
+        LeaveRequest.objects.filter(
+            organization=organization,
+            status=LeaveRequest.STATUS_APPROVED,
+            start_date__lte=today,
+            end_date__gte=today,
+            employee_id__in=employee_ids,
+        )
+        .values('employee_id')
+        .distinct()
+        .count()
+    )
+    pending_approvals = LeaveRequest.objects.filter(
+        organization=organization,
+        status=LeaveRequest.STATUS_PENDING,
+        employee_id__in=employee_ids,
+    ).count()
+
+    payroll_this_month = PayrollRecord.objects.filter(
+        organization=organization,
+        month=current_month,
+    ).aggregate(total=Sum('net_pay'))['total'] or Decimal('0')
+
+    return {
+        'totalEmployees': employee_count,
+        'presentToday': present_today,
+        'absentToday': max(employee_count - present_today - on_leave, 0),
+        'lateToday': late_today,
+        'onLeave': on_leave,
+        'remoteEmployees': remote_today,
+        'pendingApprovals': pending_approvals,
+        'payrollThisMonth': _format_currency(payroll_this_month),
+    }
+
+
+def _attendance_trend_payload(organization):
+    """Per-weekday present/late/absent counts for the current week."""
+    today = timezone.localdate()
+    week_start, week_end = _week_bounds(today)
+    employee_ids = _active_employee_ids(organization)
+    employee_count = len(employee_ids)
+
+    buckets = {week_start + timedelta(days=offset): [] for offset in range(7)}
+    records = AttendanceRecord.objects.filter(
+        organization=organization,
+        date__range=(week_start, week_end),
+        employee_id__in=employee_ids,
+    ).values_list('date', 'status')
+    for record_date, status in records:
+        buckets.setdefault(record_date, []).append(status)
+
+    trend = []
+    for day in sorted(buckets):
+        statuses = buckets[day]
+        present = sum(1 for status in statuses if status == AttendanceRecord.STATUS_PRESENT)
+        late = sum(1 for status in statuses if status == AttendanceRecord.STATUS_LATE)
+        half_day = sum(1 for status in statuses if status == AttendanceRecord.STATUS_EARLY_DEPARTURE)
+        trend.append({
+            'day': day.strftime('%a'),
+            'present': present,
+            'late': late,
+            'absent': max(employee_count - present - late - half_day, 0),
+        })
+    return trend
+
+
+def _relative_time(moment, now):
+    """Render ``moment`` as a short human label such as ``3 hours ago``."""
+    seconds = max(int((now - moment).total_seconds()), 0)
+    if seconds < 60:
+        return 'Just now'
+    for unit_seconds, label in ((86400, 'day'), (3600, 'hour'), (60, 'minute')):
+        if seconds >= unit_seconds:
+            count = seconds // unit_seconds
+            return f'{count} {label}{"s" if count > 1 else ""} ago'
+    return 'Just now'
+
+
+def _recent_activity_payload(organization, limit=10):
+    """Merge hires, leave requests and check-ins into one reverse-chronological feed.
+
+    Each source is capped at ``limit`` before merging, so the query cost stays
+    bounded no matter how much history the organization has accumulated.
+    """
+    now = timezone.now()
+    events = []
+
+    for employee in (
+        Employee.objects.filter(organization=organization)
+        .exclude(status=Employee.STATUS_TERMINATED)
+        .order_by('-created_at')[:limit]
+    ):
+        name = f'{employee.first_name} {employee.last_name}'.strip()
+        events.append((employee.created_at, {
+            'type': 'employee_joined',
+            'message': f'{name} joined as {employee.position or "an employee"}',
+            'employeeName': name,
+            'avatar': employee.avatar or None,
+        }))
+
+    for leave in (
+        LeaveRequest.objects.filter(organization=organization)
+        .select_related('employee')
+        .order_by('-created_at')[:limit]
+    ):
+        name = f'{leave.employee.first_name} {leave.employee.last_name}'.strip()
+        events.append((leave.created_at, {
+            'type': f'leave_{leave.status}',
+            'message': f'{name}’s {leave.leave_type} leave request is {leave.status}',
+            'employeeName': name,
+            'avatar': leave.employee.avatar or None,
+        }))
+
+    for record in (
+        AttendanceRecord.objects.filter(organization=organization)
+        .select_related('employee')
+        .order_by('-date', '-check_in')[:limit]
+    ):
+        name = f'{record.employee.first_name} {record.employee.last_name}'.strip()
+        moment = datetime.combine(
+            record.date,
+            record.check_in,
+            tzinfo=timezone.get_current_timezone(),
+        )
+        events.append((moment, {
+            'type': 'attendance_check_in',
+            'message': f'{name} checked in at {record.check_in.strftime("%I:%M %p").lstrip("0")}',
+            'employeeName': name,
+            'avatar': record.employee.avatar or None,
+        }))
+
+    events.sort(key=lambda item: item[0], reverse=True)
+    return [
+        {'id': index + 1, 'time': _relative_time(moment, now), **payload}
+        for index, (moment, payload) in enumerate(events[:limit])
+    ]
 
 
 def _serialize_payroll_record(record):
@@ -165,6 +790,10 @@ def payroll_summary_view(request):
 
 @csrf_exempt
 @require_http_methods(['POST'])
+@throttle_view('payroll:run', '10/min')
+# Paying a workforce twice is the worst failure mode in this codebase, so a
+# retried run must replay the first result rather than re-execute.
+@idempotent('payroll:run')
 def payroll_run_view(request):
     try:
         _, organization = _organization_for(request)
@@ -252,6 +881,42 @@ def _detail_view(request, module, record_pk):
     if request.method == 'DELETE':
         return _delete_response(module, organization, record_pk)
     return _detail_response(module, organization, record_pk, parse_json_body(request))
+
+
+@require_http_methods(['GET'])
+def dashboard_overview_view(request):
+    try:
+        user, organization = _organization_for(request)
+        return JsonResponse(_dashboard_overview_payload(user, organization))
+    except AppError as exc:
+        return error_response(exc)
+
+
+@require_http_methods(['GET'])
+def dashboard_stats_view(request):
+    try:
+        _, organization = _organization_for(request)
+        return JsonResponse(_dashboard_stats_payload(organization))
+    except AppError as exc:
+        return error_response(exc)
+
+
+@require_http_methods(['GET'])
+def dashboard_attendance_trend_view(request):
+    try:
+        _, organization = _organization_for(request)
+        return JsonResponse(_attendance_trend_payload(organization), safe=False)
+    except AppError as exc:
+        return error_response(exc)
+
+
+@require_http_methods(['GET'])
+def dashboard_recent_activity_view(request):
+    try:
+        _, organization = _organization_for(request)
+        return JsonResponse(_recent_activity_payload(organization), safe=False)
+    except AppError as exc:
+        return error_response(exc)
 
 
 @csrf_exempt

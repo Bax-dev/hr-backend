@@ -6,6 +6,7 @@ from .views import (
     analytics_view,
     approval_detail_view,
     approvals_view,
+    dashboard_overview_view,
     communication_detail_view,
     communications_view,
     compliance_detail_view,
@@ -19,6 +20,7 @@ from .views import (
 )
 
 urlpatterns = [
+    path('dashboard/overview/', dashboard_overview_view, name='dashboard-overview'),
     path('approvals/', approvals_view, name='approvals'),
     path('approvals/<uuid:record_pk>/', approval_detail_view, name='approval-detail'),
     path('communications/', communications_view, name='communications'),

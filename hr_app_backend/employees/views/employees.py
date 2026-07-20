@@ -5,6 +5,9 @@ from django.views.decorators.http import require_http_methods
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.pagination import paginated_data
+from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import (
     employee_payload,
@@ -45,6 +48,8 @@ def my_employee_view(request):
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
+@throttle_view('employees:write', '120/min')
+@idempotent('employees:create')
 def employees_view(request):
     try:
         user = require_user(request)
@@ -57,7 +62,7 @@ def employees_view(request):
             )
             return JsonResponse({
                 'success': True,
-                'data': {'employees': [serialize_employee(employee) for employee in employees]},
+                'data': paginated_data(request, employees, serialize_employee, key='employees'),
             })
 
         payload = employee_payload(parse_json_body(request))
