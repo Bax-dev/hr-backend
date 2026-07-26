@@ -7,6 +7,7 @@ from hr_app_backend.utils import AppError, get_env
 
 
 PAYSTACK_BASE_URL = "https://api.paystack.co"
+PAYSTACK_USER_AGENT = "hr-app-backend/1.0 (+https://workiva.com.ng)"
 
 
 class PaystackError(AppError):
@@ -63,6 +64,8 @@ class PaystackClient:
         headers = {
             "Authorization": f"Bearer {self.secret_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": PAYSTACK_USER_AGENT,
         }
 
         if payload is not None:
