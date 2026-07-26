@@ -4,6 +4,7 @@ from django.db import transaction
 
 from ..models import Organization, UserProfile
 from hr_app_backend.utils.errors import AuthenticationError, ConflictError, ValidationError
+from .signup_otp import send_signup_otp
 from .validation import normalize_email, validate_email_address, validate_passwords
 
 User = get_user_model()
@@ -51,6 +52,7 @@ def register_company(data):
         phone=phone,
         organization=organization,
     )
+    send_signup_otp(user)
     return user
 
 
@@ -84,6 +86,7 @@ def register_individual(data):
         full_name=full_name,
         invite_code=invite_code,
     )
+    send_signup_otp(user)
     return user
 
 

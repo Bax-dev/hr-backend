@@ -24,5 +24,6 @@ def serialize_user(user):
         'phone': getattr(profile, 'phone', ''),
         'invite_code': getattr(profile, 'invite_code', ''),
         'must_change_password': getattr(profile, 'must_change_password', False),
+        'email_verified': getattr(profile, 'email_verified', False),
         'organization': serialize_organization(organization),
     }

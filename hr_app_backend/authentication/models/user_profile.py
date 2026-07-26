@@ -27,6 +27,7 @@ class UserProfile(TimeStampedModel):
         related_name='user_profile',
     )
     must_change_password = models.BooleanField(default=False)
+    email_verified = models.BooleanField(default=False)
 
     def __str__(self):
         return f'{self.user.email} ({self.account_type})'

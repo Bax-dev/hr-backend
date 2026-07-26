@@ -53,6 +53,12 @@ class Subscription(TimeStampedModel):
     paid_at = models.DateTimeField(null=True, blank=True)
     provider_response = models.JSONField(default=dict, blank=True)
 
+    # Set once each expiry reminder has been emailed, so a daily job never
+    # sends the same window's reminder twice for the same subscription.
+    reminder_5d_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_2d_sent_at = models.DateTimeField(null=True, blank=True)
+    reminder_1d_sent_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['-created_at']
 
