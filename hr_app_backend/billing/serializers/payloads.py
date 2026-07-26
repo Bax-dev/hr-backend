@@ -3,8 +3,8 @@ from decimal import Decimal, InvalidOperation
 from hr_app_backend.utils.errors import ValidationError
 
 
-ALLOWED_PROVIDERS = {'paystack', 'flutterwave'}
-ALLOWED_PLANS = {'starter', 'professional', 'custom'}
+ALLOWED_PROVIDERS = {'paystack'}
+ALLOWED_PLANS = {'free_trial', 'starter', 'growth', 'enterprise'}
 
 
 def _value(payload, *keys, default=''):
@@ -29,12 +29,12 @@ def _parse_decimal(value, *, field_name):
 def initialize_subscription_payload(payload):
     provider = str(_value(payload, 'provider')).strip().lower()
     plan = str(_value(payload, 'plan')).strip().lower()
-    currency = str(_value(payload, 'currency', default='USD')).strip().upper() or 'USD'
+    currency = str(_value(payload, 'currency', default='NGN')).strip().upper() or 'NGN'
 
     if provider not in ALLOWED_PROVIDERS:
-        raise ValidationError('Provider must be either paystack or flutterwave.')
+        raise ValidationError('Provider must be paystack.')
     if plan not in ALLOWED_PLANS:
-        raise ValidationError('Plan must be starter, professional, or custom.')
+        raise ValidationError('Plan must be free_trial, starter, growth, or enterprise.')
 
     return {
         'provider': provider,
@@ -46,6 +46,7 @@ def initialize_subscription_payload(payload):
         'start_date': _value(payload, 'start_date', 'startDate'),
         'end_date': _value(payload, 'end_date', 'endDate'),
         'amount': _parse_decimal(_value(payload, 'amount', 'custom_amount', 'customAmount'), field_name='Amount'),
+        'billing_cycle': str(_value(payload, 'billing_cycle', 'billingCycle', default='monthly')).strip().lower() or 'monthly',
     }
 
 
@@ -56,7 +57,7 @@ def verify_subscription_payload(payload):
     if not reference:
         raise ValidationError('Reference is required.')
     if provider and provider not in ALLOWED_PROVIDERS:
-        raise ValidationError('Provider must be either paystack or flutterwave.')
+        raise ValidationError('Provider must be paystack.')
 
     return {
         'reference': reference,

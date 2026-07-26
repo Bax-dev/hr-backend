@@ -13,9 +13,17 @@ from hr_app_backend.third_parties import (
 from hr_app_backend.utils import ConflictError, ValidationError, generate_uuid4, timedelta, today_local
 
 PLAN_PRICES = {
-    Subscription.PLAN_STARTER: Decimal('4.00'),
-    Subscription.PLAN_PROFESSIONAL: Decimal('8.00'),
+    Subscription.PLAN_STARTER: {
+        'monthly': Decimal('15000.00'),
+        'annual': Decimal('150000.00'),
+    },
+    Subscription.PLAN_GROWTH: {
+        'monthly': Decimal('35000.00'),
+        'annual': Decimal('350000.00'),
+    },
 }
+
+TRIAL_DURATION_DAYS = 14
 
 
 def _parse_date(value, *, field_name):
@@ -27,32 +35,34 @@ def _parse_date(value, *, field_name):
         raise ValidationError(f'{field_name} must be a valid ISO date.') from exc
 
 
-def _resolve_dates(plan, payload):
+def _resolve_dates(plan, payload, *, billing_cycle):
     start_date = _parse_date(payload.get('start_date'), field_name='Start date') or today_local()
     end_date = _parse_date(payload.get('end_date'), field_name='End date')
 
-    if plan == Subscription.PLAN_CUSTOM:
-        if end_date is None:
-            raise ValidationError('End date is required for the custom plan.')
-        if end_date < start_date:
+    if plan == Subscription.PLAN_FREE_TRIAL:
+        resolved_end = end_date or (start_date + timedelta(days=TRIAL_DURATION_DAYS))
+        if resolved_end < start_date:
             raise ValidationError('End date cannot be earlier than start date.')
-        return start_date, end_date
+        return start_date, resolved_end
+
+    if plan == Subscription.PLAN_ENTERPRISE:
+        raise ValidationError('Enterprise plans require a demo booking, not online checkout.')
 
     if end_date is None:
-        end_date = start_date + timedelta(days=30)
+        end_date = start_date + timedelta(days=365 if billing_cycle == 'annual' else 30)
     if end_date < start_date:
         raise ValidationError('End date cannot be earlier than start date.')
     return start_date, end_date
 
 
-def _resolve_amount(plan, payload):
+def _resolve_amount(plan, payload, *, billing_cycle):
+    if plan == Subscription.PLAN_FREE_TRIAL:
+        return Decimal('0.00')
     if plan in PLAN_PRICES:
-        return PLAN_PRICES[plan]
-
-    amount = payload.get('amount')
-    if amount is None:
-        raise ValidationError('Amount is required for the custom plan.')
-    return amount
+        if billing_cycle not in {'monthly', 'annual'}:
+            raise ValidationError('Billing cycle must be monthly or annual.')
+        return PLAN_PRICES[plan][billing_cycle]
+    raise ValidationError('Unsupported plan for online checkout.')
 
 
 def _minor_units(amount):
@@ -147,25 +157,29 @@ def initialize_subscription_payment(user, payload):
 
     plan = payload['plan']
     provider = payload['provider']
-    amount = _resolve_amount(plan, payload)
-    start_date, end_date = _resolve_dates(plan, payload)
+    billing_cycle = payload.get('billing_cycle') or 'monthly'
+    amount = _resolve_amount(plan, payload, billing_cycle=billing_cycle)
+    start_date, end_date = _resolve_dates(plan, payload, billing_cycle=billing_cycle)
     email = (payload.get('email') or user.email or organization.email).strip()
     customer_name = (payload.get('customer_name') or profile.full_name or organization.name).strip()
     callback_url = (payload.get('callback_url') or '').strip()
 
     if not email:
         raise ValidationError('A customer email is required to initialize payment.')
-    if provider == Subscription.PROVIDER_FLUTTERWAVE and not callback_url:
-        raise ValidationError('Redirect URL is required for Flutterwave payments.')
+    if provider != Subscription.PROVIDER_PAYSTACK:
+        raise ValidationError('Only Paystack payments are supported.')
+    if plan != Subscription.PLAN_FREE_TRIAL and not callback_url:
+        raise ValidationError('Callback URL is required for Paystack payments.')
 
-    pending_subscription = Subscription.objects.filter(
-        organization=organization,
-        plan=plan,
-        provider=provider,
-        status=Subscription.STATUS_PENDING,
-    ).order_by('-created_at').first()
-    if pending_subscription is not None:
-        raise ConflictError('There is already a pending payment for this plan and provider.')
+    if plan != Subscription.PLAN_FREE_TRIAL:
+        pending_subscription = Subscription.objects.filter(
+            organization=organization,
+            plan=plan,
+            provider=provider,
+            status=Subscription.STATUS_PENDING,
+        ).order_by('-created_at').first()
+        if pending_subscription is not None:
+            raise ConflictError('There is already a pending payment for this plan and provider.')
 
     subscription = Subscription.objects.create(
         organization=organization,
@@ -179,16 +193,21 @@ def initialize_subscription_payment(user, payload):
         end_date=end_date,
     )
 
+    if plan == Subscription.PLAN_FREE_TRIAL:
+        subscription.status = Subscription.STATUS_ACTIVE
+        subscription.paid_at = timezone.now()
+        subscription.provider_response = {
+            'status': True,
+            'message': 'Free trial activated.',
+            'data': {
+                'billing_cycle': 'trial',
+            },
+        }
+        subscription.save(update_fields=['status', 'paid_at', 'provider_response', 'updated_at'])
+        return subscription
+
     try:
-        if provider == Subscription.PROVIDER_PAYSTACK:
-            _initialize_with_paystack(subscription, email=email, callback_url=callback_url)
-        else:
-            _initialize_with_flutterwave(
-                subscription,
-                email=email,
-                customer_name=customer_name,
-                callback_url=callback_url,
-            )
+        _initialize_with_paystack(subscription, email=email, callback_url=callback_url)
     except (PaystackError, FlutterwaveError):
         subscription.status = Subscription.STATUS_FAILED
         subscription.save(update_fields=['status', 'updated_at'])

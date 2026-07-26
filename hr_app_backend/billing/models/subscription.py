@@ -6,13 +6,15 @@ from hr_app_backend.utils import TimeStampedModel
 
 
 class Subscription(TimeStampedModel):
+    PLAN_FREE_TRIAL = 'free_trial'
     PLAN_STARTER = 'starter'
-    PLAN_PROFESSIONAL = 'professional'
-    PLAN_CUSTOM = 'custom'
+    PLAN_GROWTH = 'growth'
+    PLAN_ENTERPRISE = 'enterprise'
     PLAN_CHOICES = [
+        (PLAN_FREE_TRIAL, 'Free Trial'),
         (PLAN_STARTER, 'Starter'),
-        (PLAN_PROFESSIONAL, 'Professional'),
-        (PLAN_CUSTOM, 'Custom'),
+        (PLAN_GROWTH, 'Growth'),
+        (PLAN_ENTERPRISE, 'Enterprise'),
     ]
 
     PROVIDER_PAYSTACK = 'paystack'
@@ -42,7 +44,7 @@ class Subscription(TimeStampedModel):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
     reference = models.CharField(max_length=64, unique=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    currency = models.CharField(max_length=10, default='USD')
+    currency = models.CharField(max_length=10, default='NGN')
     start_date = models.DateField()
     end_date = models.DateField(null=True, blank=True)
     payment_url = models.URLField(blank=True)
