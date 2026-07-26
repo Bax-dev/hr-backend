@@ -8,7 +8,7 @@ from hr_app_backend.platform.views import (
     dashboard_recent_activity_view,
     dashboard_stats_view,
 )
-from hr_app_backend.talent.views import job_detail_view, jobs_view
+from hr_app_backend.talent.views import job_detail_view, jobs_view, public_job_detail_view
 
 from .docs import openapi_spec_view, swagger_ui_view
 
@@ -29,6 +29,8 @@ urlpatterns = [
     path('jobs', jobs_view, name='jobs'),
     path('jobs/', include('hr_app_backend.talent.jobs_urls')),
     path('jobs/<int:job_id>', job_detail_view, name='job-detail'),
+    # Unauthenticated lookup backing the public careers share link.
+    path('public/jobs/<int:job_id>/', public_job_detail_view, name='public-job-detail'),
     path('payroll/', include('hr_app_backend.platform.payroll_urls')),
     path("docs/", swagger_ui_view, name="swagger-ui"),
     path("docs/openapi.yaml", openapi_spec_view, name="openapi-spec"),

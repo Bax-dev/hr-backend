@@ -53,6 +53,10 @@ def update_company_profile(user, data):
         settings.headquarters_address = str(data['headquarters_address']).strip()
     if data.get('website') is not None:
         settings.website = str(data['website']).strip()
+    if data.get('logo') is not None:
+        settings.logo = str(data['logo']).strip()
+    if data.get('icon_logo') is not None:
+        settings.icon_logo = str(data['icon_logo']).strip()
 
     with transaction.atomic():
         organization.save()

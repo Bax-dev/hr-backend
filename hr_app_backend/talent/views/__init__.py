@@ -1,4 +1,4 @@
-from .recruitment import job_detail_view, jobs_view
+from .recruitment import job_detail_view, jobs_view, public_job_detail_view
 from .talent import (
     offboarding_detail_view,
     offboarding_view,
@@ -18,5 +18,6 @@ __all__ = [
     'onboarding_view',
     'performance_detail_view',
     'performance_view',
+    'public_job_detail_view',
     'talent_summary_view',
 ]

@@ -18,6 +18,8 @@ class WorkspaceSettings(TimeStampedModel):
     tax_id = models.CharField(max_length=100, blank=True)
     headquarters_address = models.CharField(max_length=255, blank=True)
     website = models.CharField(max_length=255, blank=True)
+    logo = models.URLField(max_length=500, blank=True)
+    icon_logo = models.URLField(max_length=500, blank=True)
 
     # Attendance policy.
     standard_check_in = models.TimeField(default=datetime.time(hour=9, minute=0))

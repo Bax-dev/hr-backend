@@ -317,11 +317,15 @@ def get_my_employee(user):
     ).get(pk=employee.pk)
 
 
+SELF_EDIT_QUOTA_FIELDS = frozenset({'email', 'first_name', 'last_name', 'phone', 'gender', 'country', 'date_of_birth'})
+
+
 @transaction.atomic
 def update_my_employee(user, data):
     """Apply a staff member's own edits to their linked employee record.
 
-    Only personal fields are editable, and edits are capped per month.
+    Personal fields are capped at a few edits per month; the profile photo is
+    exempt from that quota since it isn't a "personal detail" edit.
     """
     employee = get_my_employee(user)
     if employee is None:
@@ -329,12 +333,19 @@ def update_my_employee(user, data):
 
     period = _current_period()
     used = employee.self_edits_used if employee.self_edits_period == period else 0
-    if used >= SELF_EDIT_MONTHLY_LIMIT:
+    if SELF_EDIT_QUOTA_FIELDS.intersection(data) and used >= SELF_EDIT_MONTHLY_LIMIT:
         raise PermissionDeniedError(
             f'You have reached your monthly profile edit limit of {SELF_EDIT_MONTHLY_LIMIT}.'
         )
 
     changed = False
+    avatar_changed = False
+
+    if 'avatar' in data:
+        avatar = _clean_text(data['avatar'])
+        if avatar != employee.avatar:
+            employee.avatar = avatar
+            avatar_changed = True
 
     if 'email' in data and data['email'] is not None:
         email = _clean_text(data['email']).lower()
@@ -373,6 +384,8 @@ def update_my_employee(user, data):
     if changed:
         employee.self_edits_used = used + 1
         employee.self_edits_period = period
+
+    if changed or avatar_changed:
         employee.save()
 
     return employee

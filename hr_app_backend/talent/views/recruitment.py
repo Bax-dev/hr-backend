@@ -8,7 +8,7 @@ from hr_app_backend.employees.views.helpers import require_user
 from hr_app_backend.utils.errors import AppError
 
 from ..serializers import job_payload, serialize_job
-from ..services import create_job, delete_job, list_jobs, update_job
+from ..services import create_job, delete_job, get_public_job, list_jobs, update_job
 
 
 @csrf_exempt
@@ -33,6 +33,16 @@ def job_detail_view(request, job_id):
             delete_job(user, job_id)
             return JsonResponse(None, safe=False, status=204)
         job = update_job(user, job_id, job_payload(parse_json_body(request), partial=True))
+        return JsonResponse(serialize_job(job))
+    except AppError as exc:
+        return error_response(exc)
+
+
+@require_http_methods(['GET'])
+def public_job_detail_view(request, job_id):
+    """Unauthenticated lookup for the public careers share link."""
+    try:
+        job = get_public_job(job_id)
         return JsonResponse(serialize_job(job))
     except AppError as exc:
         return error_response(exc)

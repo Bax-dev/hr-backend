@@ -8,6 +8,8 @@ def serialize_company_profile(organization, settings):
         'tax_id': settings.tax_id,
         'headquarters_address': settings.headquarters_address,
         'website': settings.website,
+        'logo': settings.logo,
+        'icon_logo': settings.icon_logo,
     }
 
 

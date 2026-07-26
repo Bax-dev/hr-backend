@@ -1,10 +1,23 @@
 from django.db import transaction
 
 from hr_app_backend.departments.models import Department
-from hr_app_backend.utils.errors import ValidationError
+from hr_app_backend.utils.errors import NotFoundError, ValidationError
 
 from ..models import JobPosting, OffboardingPlan, OnboardingPlan, PerformanceReview
 from .helpers import clean_text, require_organization, get_record
+
+
+def get_public_job(job_id):
+    """Look up a job posting for the public careers page (no auth, no org scoping).
+
+    Draft postings are never publicly visible; anything else (e.g. Open,
+    Closed) can be viewed by anyone holding the link.
+    """
+    try:
+        job = JobPosting.objects.exclude(status__iexact='draft').get(pk=job_id)
+    except (JobPosting.DoesNotExist, ValueError, TypeError) as exc:
+        raise NotFoundError('Job posting not found.') from exc
+    return job
 
 
 def talent_summary(user):

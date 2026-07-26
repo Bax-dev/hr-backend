@@ -7,6 +7,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
+from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.attendance.models import AttendanceRecord
@@ -14,7 +15,7 @@ from hr_app_backend.employees.models import Employee
 from hr_app_backend.employees.services import get_my_employee
 from hr_app_backend.employees.views.helpers import require_user
 from hr_app_backend.leave.models import LeaveRequest
-from hr_app_backend.utils.errors import AppError, NotFoundError, ValidationError
+from hr_app_backend.utils.errors import AppError, NotFoundError, PermissionDeniedError, ValidationError
 from hr_app_backend.utils.idempotency import idempotent
 from hr_app_backend.utils.throttles import throttle_view
 
@@ -50,6 +51,17 @@ def _organization_for(request):
     if organization is None:
         raise ValidationError('Your account is not linked to an organization.')
     return user, organization
+
+
+def _is_individual_account(user):
+    profile = getattr(user, 'profile', None)
+    return getattr(profile, 'account_type', None) == UserProfile.ACCOUNT_TYPE_INDIVIDUAL
+
+
+def _require_company_account(user):
+    """Reject individual/staff accounts from organization-wide admin actions."""
+    if _is_individual_account(user):
+        raise PermissionDeniedError('Only company administrators can perform this action.')
 
 
 def _announcement_payload(data):
@@ -769,11 +781,14 @@ def _build_payroll_record(organization, employee, month):
 @require_http_methods(['GET'])
 def payroll_records_view(request):
     try:
-        _, organization = _organization_for(request)
+        user, organization = _organization_for(request)
         month = _month_value(request.GET.get('month'))
-        records = list(
-            PayrollRecord.objects.filter(organization=organization, month=month).select_related('employee')
-        )
+        queryset = PayrollRecord.objects.filter(organization=organization, month=month).select_related('employee')
+        if _is_individual_account(user):
+            # Staff may only ever see their own payslip, never the rest of the org's.
+            employee = get_my_employee(user)
+            queryset = queryset.filter(employee=employee) if employee is not None else queryset.none()
+        records = list(queryset)
         return JsonResponse({'success': True, 'data': {'records': [_serialize_payroll_record(record) for record in records]}})
     except AppError as exc:
         return error_response(exc)
@@ -782,7 +797,8 @@ def payroll_records_view(request):
 @require_http_methods(['GET'])
 def payroll_summary_view(request):
     try:
-        _, organization = _organization_for(request)
+        user, organization = _organization_for(request)
+        _require_company_account(user)
         month = _month_value(request.GET.get('month'))
         records = list(PayrollRecord.objects.filter(organization=organization, month=month))
         return JsonResponse({'success': True, 'data': {'summary': _payroll_summary(month, records)}})
@@ -798,7 +814,8 @@ def payroll_summary_view(request):
 @idempotent('payroll:run')
 def payroll_run_view(request):
     try:
-        _, organization = _organization_for(request)
+        user, organization = _organization_for(request)
+        _require_company_account(user)
         month = _month_value(parse_json_body(request).get('month'))
         employees = list(
             Employee.objects.filter(organization=organization).exclude(status=Employee.STATUS_TERMINATED)
