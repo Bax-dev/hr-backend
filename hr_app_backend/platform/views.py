@@ -11,13 +11,15 @@ from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.attendance.models import AttendanceRecord
 from hr_app_backend.employees.models import Employee
+from hr_app_backend.employees.services import get_my_employee
 from hr_app_backend.employees.views.helpers import require_user
 from hr_app_backend.leave.models import LeaveRequest
 from hr_app_backend.utils.errors import AppError, NotFoundError, ValidationError
 from hr_app_backend.utils.idempotency import idempotent
 from hr_app_backend.utils.throttles import throttle_view
 
-from .models import Announcement, PayrollRecord, PlatformRecord
+from .models import Announcement, Notification, PayrollRecord, PlatformRecord
+from .notifications_service import create_notification
 
 PLATFORM_MODULE_CONFIG = {
     'approvals': {'list_key': 'approvals', 'item_key': 'approval'},
@@ -810,6 +812,14 @@ def payroll_run_view(request):
         for employee in employees:
             if employee.id not in existing_ids:
                 _build_payroll_record(organization, employee, month)
+                # Let the employee know their payslip is ready to view/download.
+                create_notification(
+                    organization=organization,
+                    recipient=employee,
+                    title=f'Payslip ready for {month}',
+                    body=f'Your payslip for {month} has been issued and is now available in the Payslips section.',
+                    category=Notification.CATEGORY_PAYROLL,
+                )
 
         records = list(
             PayrollRecord.objects.filter(organization=organization, month=month).select_related('employee')
@@ -1005,6 +1015,89 @@ def notifications_view(request):
 def notification_detail_view(request, record_pk):
     try:
         return _detail_view(request, 'notifications', record_pk)
+    except AppError as exc:
+        return error_response(exc)
+
+
+def _serialize_notification(notification):
+    return {
+        'id': str(notification.id),
+        'title': notification.title,
+        'body': notification.body,
+        'category': notification.category,
+        'read': notification.read_at is not None,
+        'readAt': notification.read_at.isoformat() if notification.read_at else None,
+        'createdAt': notification.created_at.isoformat(),
+    }
+
+
+def _recipient_for(request):
+    """Return ``(organization, employee)`` for the signed-in user's inbox.
+
+    ``employee`` is ``None`` when the account has no linked employee record.
+    """
+    user, organization = _organization_for(request)
+    return organization, get_my_employee(user)
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def notification_inbox_view(request):
+    """List the signed-in user's personal notifications (newest first)."""
+    try:
+        organization, employee = _recipient_for(request)
+        if employee is None:
+            return JsonResponse({'success': True, 'data': {'notifications': [], 'unreadCount': 0}})
+
+        notifications = list(
+            Notification.objects.filter(organization=organization, recipient=employee)
+        )
+        unread_count = sum(1 for item in notifications if item.read_at is None)
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'notifications': [_serialize_notification(item) for item in notifications],
+                'unreadCount': unread_count,
+            },
+        })
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def notification_inbox_read_all_view(request):
+    """Mark all of the signed-in user's notifications as read."""
+    try:
+        organization, employee = _recipient_for(request)
+        if employee is not None:
+            Notification.objects.filter(
+                organization=organization, recipient=employee, read_at__isnull=True
+            ).update(read_at=timezone.now())
+        return JsonResponse({'success': True, 'message': 'All notifications marked as read.'})
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def notification_inbox_read_view(request, notification_pk):
+    """Mark a single notification as read for the signed-in user."""
+    try:
+        organization, employee = _recipient_for(request)
+        if employee is None:
+            raise NotFoundError('Notification not found.')
+        try:
+            notification = Notification.objects.get(
+                organization=organization, recipient=employee, pk=notification_pk
+            )
+        except Notification.DoesNotExist as exc:
+            raise NotFoundError('Notification not found.') from exc
+
+        if notification.read_at is None:
+            notification.read_at = timezone.now()
+            notification.save(update_fields=['read_at', 'updated_at'])
+        return JsonResponse({'success': True, 'data': {'notification': _serialize_notification(notification)}})
     except AppError as exc:
         return error_response(exc)
 

@@ -129,6 +129,7 @@ def create_leave(user, data):
 @transaction.atomic
 def update_leave(user, leave_pk, data):
     leave = get_leave(user, leave_pk)
+    previous_status = leave.status
 
     if 'employee_id' in data:
         leave.employee = _get_employee(leave.organization, data['employee_id'])
@@ -158,4 +159,22 @@ def update_leave(user, leave_pk, data):
         leave.reviewed_at = None if leave.status == LeaveRequest.STATUS_PENDING else local_now()
 
     leave.save()
+
+    # Notify the employee when a manager decides on their request. Only fire on
+    # an actual transition into a decided state so repeated PATCHes don't spam.
+    decided_statuses = (LeaveRequest.STATUS_APPROVED, LeaveRequest.STATUS_REJECTED)
+    if leave.status in decided_statuses and leave.status != previous_status:
+        from hr_app_backend.platform.notifications_service import create_notification
+
+        create_notification(
+            organization=leave.organization,
+            recipient=leave.employee,
+            title=f'Leave request {leave.get_status_display().lower()}',
+            body=(
+                f'Your {leave.get_leave_type_display()} leave from {leave.start_date} '
+                f'to {leave.end_date} was {leave.get_status_display().lower()}.'
+            ),
+            category='Leave',
+        )
+
     return leave

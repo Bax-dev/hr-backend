@@ -16,6 +16,9 @@ from .views import (
     integration_detail_view,
     integrations_view,
     notification_detail_view,
+    notification_inbox_read_all_view,
+    notification_inbox_read_view,
+    notification_inbox_view,
     notifications_view,
 )
 
@@ -32,6 +35,10 @@ urlpatterns = [
     path('ai-features/', ai_features_view, name='ai-features'),
     path('ai-features/<uuid:record_pk>/', communication_detail_view, {'module': 'ai-features'}, name='ai-feature-detail'),
     path('notifications/', notifications_view, name='notifications'),
+    # Personal inbox routes must precede the ``<uuid:record_pk>`` detail route.
+    path('notifications/inbox/', notification_inbox_view, name='notification-inbox'),
+    path('notifications/inbox/read-all/', notification_inbox_read_all_view, name='notification-inbox-read-all'),
+    path('notifications/inbox/<uuid:notification_pk>/read/', notification_inbox_read_view, name='notification-inbox-read'),
     path('notifications/<uuid:record_pk>/', notification_detail_view, name='notification-detail'),
     path('integrations/', integrations_view, name='integrations'),
     path('integrations/<uuid:record_pk>/', integration_detail_view, name='integration-detail'),

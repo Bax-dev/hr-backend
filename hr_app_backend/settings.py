@@ -20,6 +20,7 @@ ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhos
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'hr_app_backend.middleware.DatabaseConnectionCleanupMiddleware',
     'hr_app_backend.middleware.RequestIDMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
