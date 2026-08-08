@@ -27,6 +27,7 @@ PUBLIC_PATHS = {
 # generated client output. Paths not listed here are intentionally omitted from
 # Swagger because the current app does not call them.
 USED_OPERATIONS = {
+    "/api/v1/audit-logs/": {"get"},
     "/api/announcements": {"get", "post"},
     "/api/celebrations": {"get"},
     "/api/dashboard/overview": {"get"},

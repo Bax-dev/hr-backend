@@ -2,6 +2,16 @@
 .env
 .env.*
 !.env.example
+CRED.md
+cred.md
+
+# Terraform local state and sensitive values
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfplan
+infra/*.tfvars
+!infra/*.tfvars.example
 
 # Python
 __pycache__/
@@ -38,3 +48,6 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat

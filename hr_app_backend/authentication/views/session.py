@@ -5,6 +5,7 @@ from datetime import date
 
 from hr_app_backend.utils.errors import AppError, AuthenticationError, PermissionDeniedError, ValidationError
 from hr_app_backend.utils.throttles import throttle, throttle_view
+from hr_app_backend.audit_logs.services import record_audit_event_safely
 
 from ..serializers import serialize_user
 from ..serializers import change_password_payload, login_payload
@@ -22,6 +23,12 @@ def login_view(request):
         # many IPs, so also cap attempts against a single account.
         throttle(request, scope='auth:login:account', rate='10/min', ident=payload['email'].lower())
         user = login_user(payload)
+        organization = getattr(user.profile, 'organization', None)
+        if organization:
+            record_audit_event_safely(
+                organization=organization, actor=user, request=request, action='auth.login',
+                category='authentication', description=f'{user.email} signed in.', resource_type='user', resource_id=user.id,
+            )
         return JsonResponse({'success': True, 'data': auth_response(user)})
     except AppError as exc:
         return error_response(exc)
@@ -72,7 +79,14 @@ def me_view(request):
 @csrf_exempt
 @require_POST
 def logout_view(request):
-    destroy_session(token_from_request(request))
+    token = token_from_request(request)
+    user = get_user_by_token(token)
+    if user is not None and user.profile.organization_id:
+        record_audit_event_safely(
+            organization=user.profile.organization, actor=user, request=request, action='auth.logout',
+            category='authentication', description=f'{user.email} signed out.', resource_type='user', resource_id=user.id,
+        )
+    destroy_session(token)
     return JsonResponse({'success': True, 'message': 'Logged out successfully.'})
 
 
@@ -86,6 +100,12 @@ def change_password_view(request):
         if user is None:
             raise AuthenticationError('Authentication credentials were not provided or are invalid.')
         updated_user = change_password(user, change_password_payload(load_json(request)))
+        if updated_user.profile.organization_id:
+            record_audit_event_safely(
+                organization=updated_user.profile.organization, actor=updated_user, request=request,
+                action='auth.password_changed', category='security',
+                description=f'{updated_user.email} changed their password.', resource_type='user', resource_id=updated_user.id,
+            )
         return JsonResponse({'success': True, 'data': {'user': serialize_user(updated_user)}})
     except AppError as exc:
         return error_response(exc)

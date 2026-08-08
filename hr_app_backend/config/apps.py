@@ -11,6 +11,7 @@ THIRD_PARTY_APPS = []
 
 LOCAL_APPS = [
     'hr_app_backend.api',
+    'hr_app_backend.audit_logs',
     'hr_app_backend.attendance',
     'hr_app_backend.authentication',
     'hr_app_backend.billing',

@@ -1,0 +1,12 @@
+.git
+.github
+.env*
+CRED.md
+infra
+.venv
+venv
+__pycache__
+*.pyc
+db.sqlite3
+media
+staticfiles
