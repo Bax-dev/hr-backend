@@ -1,0 +1,56 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main, staging]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: backend-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Django checks and tests
+        env:
+          DJANGO_DEBUG: 'true'
+          DB_NAME: postgres
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+        run: |
+          python manage.py check
+          python manage.py test
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Build and push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          docker build -t "$REGISTRY/workiva-backend:$DEPLOY_ENV" -t "$REGISTRY/workiva-backend:${GITHUB_SHA}" .
+          docker push "$REGISTRY/workiva-backend:$DEPLOY_ENV"
+          docker push "$REGISTRY/workiva-backend:${GITHUB_SHA}"
+      - name: Roll ECS service
+        run: aws ecs update-service --cluster "workiva-$DEPLOY_ENV" --service backend --force-new-deployment
+      - name: Wait for stability
+        run: aws ecs wait services-stable --cluster "workiva-$DEPLOY_ENV" --services backend

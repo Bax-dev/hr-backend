@@ -2,6 +2,16 @@
 .env
 .env.*
 !.env.example
+CRED.md
+cred.md
+
+# Terraform local state and sensitive values
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfplan
+infra/*.tfvars
+!infra/*.tfvars.example
 
 # Python
 __pycache__/

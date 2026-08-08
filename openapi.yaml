@@ -1170,6 +1170,47 @@
         ]
       }
     },
+    "/api/v1/audit-logs/": {
+      "get": {
+        "operationId": "list_get",
+        "tags": [
+          "audit-logs"
+        ],
+        "summary": "Retrieve resource",
+        "responses": {
+          "200": {
+            "description": "Successful response.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation or bad request error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed or credentials were not supplied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/change-password/": {
       "post": {
         "operationId": "change_password_post",

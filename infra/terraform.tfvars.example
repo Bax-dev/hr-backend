@@ -1,0 +1,4 @@
+aws_region          = "us-east-1"
+github_owner        = "YOUR_GITHUB_ORG_OR_USERNAME"
+backend_repository  = "hr-backend"
+frontend_repository = "workiva-frontend"
