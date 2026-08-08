@@ -10,7 +10,7 @@ from hr_app_backend.utils.pagination import paginated_data
 from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import leave_payload, serialize_leave
-from ..services import create_leave, get_leave, list_leaves, update_leave
+from ..services import create_leave, delete_leave, get_leave, list_leaves, update_leave
 from .helpers import require_user
 
 
@@ -40,13 +40,17 @@ def leaves_view(request):
 
 
 @csrf_exempt
-@require_http_methods(['GET', 'PUT', 'PATCH'])
+@require_http_methods(['GET', 'PUT', 'PATCH', 'DELETE'])
 def leave_detail_view(request, leave_pk):
     try:
         user = require_user(request)
         if request.method == 'GET':
             leave = get_leave(user, leave_pk)
             return JsonResponse({'success': True, 'data': {'leave': serialize_leave(leave)}})
+
+        if request.method == 'DELETE':
+            delete_leave(user, leave_pk)
+            return JsonResponse({'success': True, 'data': None})
 
         payload = leave_payload(parse_json_body(request), partial=True)
         leave = update_leave(user, leave_pk, payload)

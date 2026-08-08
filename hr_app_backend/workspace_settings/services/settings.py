@@ -2,6 +2,7 @@ import datetime
 
 from django.db import transaction
 
+from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.utils.errors import PermissionDeniedError, ValidationError
 
 from ..models import WorkspaceSettings
@@ -14,6 +15,8 @@ def _require_organization(user):
     organization = getattr(profile, 'organization', None) if profile else None
     if organization is None:
         raise PermissionDeniedError('A company account is required to manage workspace settings.')
+    if getattr(profile, 'account_type', None) != UserProfile.ACCOUNT_TYPE_COMPANY:
+        raise PermissionDeniedError('Only company administrators can manage workspace settings.')
     return organization
 
 

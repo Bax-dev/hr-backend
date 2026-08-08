@@ -7,7 +7,12 @@ from hr_app_backend.utils.idempotency import idempotent
 from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import initialize_subscription_payload, serialize_subscription, verify_subscription_payload
-from ..services import initialize_subscription_payment, verify_subscription_payment
+from ..services import (
+    initialize_paid_signup_checkout,
+    initialize_subscription_payment,
+    verify_paid_signup_checkout,
+    verify_subscription_payment,
+)
 from .helpers import error_response, load_json, require_authenticated_user
 
 
@@ -57,5 +62,39 @@ def verify_subscription_payment_view(request):
                 },
             }
         )
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_POST
+@throttle_view('billing:signup-initialize', '10/min')
+def initialize_paid_signup_checkout_view(request):
+    try:
+        result = initialize_paid_signup_checkout(load_json(request))
+        return JsonResponse({'success': True, 'data': result}, status=201)
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_POST
+@throttle_view('billing:signup-verify', '20/min')
+def verify_paid_signup_checkout_view(request):
+    try:
+        reference = str(load_json(request).get('reference') or '').strip()
+        if not reference:
+            from hr_app_backend.utils.errors import ValidationError
+            raise ValidationError('Reference is required.')
+        subscription, session, provider_response = verify_paid_signup_checkout(reference)
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'subscription': serialize_subscription(subscription),
+                'payment_verified': True,
+                'session': session,
+                'provider_response': provider_response,
+            },
+        })
     except AppError as exc:
         return error_response(exc)

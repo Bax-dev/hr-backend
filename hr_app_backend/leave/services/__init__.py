@@ -1,5 +1,6 @@
 from .leaves import (
     create_leave,
+    delete_leave,
     get_leave,
     list_leaves,
     update_leave,
@@ -7,6 +8,7 @@ from .leaves import (
 
 __all__ = [
     'create_leave',
+    'delete_leave',
     'get_leave',
     'list_leaves',
     'update_leave',

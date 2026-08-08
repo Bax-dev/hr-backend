@@ -80,18 +80,14 @@ def create_performance(user, data):
     organization = require_organization(user)
     employee_name = clean_text(data.get('employee_name'))
     review_cycle = clean_text(data.get('review_cycle'))
-    owner = clean_text(data.get('owner'))
     if len(employee_name) < 2:
         raise ValidationError('Employee name is required.')
     if len(review_cycle) < 2:
         raise ValidationError('Review cycle is required.')
-    if len(owner) < 2:
-        raise ValidationError('Owner is required.')
     return PerformanceReview.objects.create(
         organization=organization,
         employee_name=employee_name,
         review_cycle=review_cycle,
-        owner=owner,
         priority=clean_priority(data.get('priority')),
         status=clean_status(data.get('status')),
         notes=clean_text(data.get('notes')),
@@ -105,8 +101,6 @@ def update_performance(user, record_pk, data):
         record.employee_name = clean_text(data.get('employee_name'))
     if 'review_cycle' in data:
         record.review_cycle = clean_text(data.get('review_cycle'))
-    if 'owner' in data:
-        record.owner = clean_text(data.get('owner'))
     if 'priority' in data:
         record.priority = clean_priority(data.get('priority'))
     if 'status' in data:

@@ -1125,6 +1125,49 @@
             }
           }
         }
+      },
+      "delete": {
+        "operationId": "attendance_location_detail_delete",
+        "tags": [
+          "attendance"
+        ],
+        "summary": "Delete resource",
+        "responses": {
+          "204": {
+            "description": "Resource deleted successfully."
+          },
+          "400": {
+            "description": "Validation or bad request error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed or credentials were not supplied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "location_pk",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     },
     "/api/v1/auth/change-password/": {
@@ -1429,58 +1472,6 @@
     "/api/v1/auth/signup/company/": {
       "post": {
         "operationId": "signup_company_post",
-        "tags": [
-          "auth"
-        ],
-        "summary": "Create resource",
-        "responses": {
-          "201": {
-            "description": "Resource created successfully.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation or bad request error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Authentication failed or credentials were not supplied.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GenericObject"
-              }
-            }
-          }
-        },
-        "security": []
-      }
-    },
-    "/api/v1/auth/signup/individual/": {
-      "post": {
-        "operationId": "signup_individual_post",
         "tags": [
           "auth"
         ],
@@ -2017,6 +2008,49 @@
             }
           }
         }
+      },
+      "delete": {
+        "operationId": "leave_detail_delete",
+        "tags": [
+          "leave"
+        ],
+        "summary": "Delete resource",
+        "responses": {
+          "204": {
+            "description": "Resource deleted successfully."
+          },
+          "400": {
+            "description": "Validation or bad request error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication failed or credentials were not supplied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "leave_pk",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
       }
     },
     "/api/v1/notifications/": {

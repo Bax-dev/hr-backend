@@ -18,7 +18,7 @@ from .helpers import error_response, load_json
 def signup_company_view(request):
     try:
         user = register_company(company_signup_payload(load_json(request)))
-        return JsonResponse({'success': True, 'data': auth_response(user)}, status=201)
+        return JsonResponse({'success': True, 'data': {'email': user.email, 'expires_in': 600}}, status=201)
     except AppError as exc:
         return error_response(exc)
 
@@ -30,7 +30,7 @@ def signup_company_view(request):
 def signup_individual_view(request):
     try:
         user = register_individual(individual_signup_payload(load_json(request)))
-        return JsonResponse({'success': True, 'data': auth_response(user)}, status=201)
+        return JsonResponse({'success': True, 'data': {'email': user.email, 'expires_in': 600}}, status=201)
     except AppError as exc:
         return error_response(exc)
 

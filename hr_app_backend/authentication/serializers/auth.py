@@ -38,6 +38,7 @@ def individual_signup_payload(payload):
         'invite_code': _value(payload, 'invite_code', 'inviteCode'),
         'password': _value(payload, 'password'),
         'confirm_password': _value(payload, 'confirm_password', 'confirmPassword'),
+        'plan': _value(payload, 'plan', default='free'),
     }
 
 

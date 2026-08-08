@@ -21,6 +21,7 @@ JOB_FIELDS = [
     ('type', 'type'),
     ('status', 'status'),
     ('description', 'description'),
+    ('application_email', 'application_email', 'applicationEmail'),
 ]
 
 ONBOARDING_FIELDS = [
@@ -35,7 +36,6 @@ ONBOARDING_FIELDS = [
 PERFORMANCE_FIELDS = [
     ('employee_name', 'employee_name', 'employeeName'),
     ('review_cycle', 'review_cycle', 'reviewCycle'),
-    ('owner', 'owner'),
     ('priority', 'priority'),
     ('status', 'status'),
     ('notes', 'notes'),

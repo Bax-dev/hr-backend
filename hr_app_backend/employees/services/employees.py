@@ -1,7 +1,5 @@
 import datetime
 import decimal
-import secrets
-import string
 from urllib.parse import urlencode
 
 from django.contrib.auth import get_user_model
@@ -11,6 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 
 from hr_app_backend.authentication.models import UserProfile
+from hr_app_backend.authentication.services.employee_invites import create_employee_invite_token
 from hr_app_backend.services import render_email_template
 from hr_app_backend.third_parties import get_email_service
 from hr_app_backend.utils import get_env
@@ -26,7 +25,6 @@ from ..models import Designation, Employee, Team
 
 User = get_user_model()
 REQUIRED_FIELDS = ('first_name', 'last_name', 'email')
-TEMP_PASSWORD_ALPHABET = string.ascii_letters + string.digits
 DEFAULT_LOGIN_URL = 'http://localhost:5173/login'
 
 
@@ -107,36 +105,31 @@ def _display_employee_name(employee):
     return f'{employee.first_name} {employee.last_name}'.strip()
 
 
-def _generate_temporary_password(length=12):
-    return ''.join(secrets.choice(TEMP_PASSWORD_ALPHABET) for _ in range(length))
-
-
-def _build_login_url(email):
+def _build_invite_url(token):
     base_url = get_env('FRONTEND_LOGIN_URL', DEFAULT_LOGIN_URL).strip() or DEFAULT_LOGIN_URL
+    base_url = base_url.rsplit('/login', 1)[0] + '/accept-invite'
     separator = '&' if '?' in base_url else '?'
-    return f'{base_url}{separator}{urlencode({"email": email})}'
+    return f'{base_url}{separator}{urlencode({"token": token})}'
 
 
-def _send_employee_invite_email(*, employee, temporary_password):
-    login_url = _build_login_url(employee.email)
+def _send_employee_invite_email(*, employee, user):
+    invite_url = _build_invite_url(create_employee_invite_token(user))
     html_body = render_email_template(
         'emails/employee_invite.html',
         {
             'email_title': 'Your Workiva employee account is ready',
             'email_eyebrow': 'Employee Access',
             'email_heading': 'Your employee account is ready',
-            'email_intro': 'Sign in with the details below to access your workspace, review your profile, and complete your first-password update.',
+            'email_intro': 'Use the secure link below to finish setting up your employee account.',
             'recipient_email': employee.email,
-            'temporary_password': temporary_password,
-            'login_url': login_url,
+            'invite_url': invite_url,
         },
     )
     text_body = (
         f'Your Workiva employee account is ready.\n\n'
         f'Email: {employee.email}\n'
-        f'Temporary password: {temporary_password}\n'
-        f'Login: {login_url}\n\n'
-        f'You will be required to change your password immediately after you sign in.'
+        f'Complete account setup: {invite_url}\n\n'
+        f'This secure invitation link expires in 7 days.'
     )
     get_email_service().send_mail(
         subject='Your Workiva employee account is ready',
@@ -150,11 +143,9 @@ def _create_employee_user_account(*, employee):
     if User.objects.filter(email=employee.email).exists():
         raise ConflictError('A user account with this employee email already exists.')
 
-    temporary_password = _generate_temporary_password()
     user = User.objects.create_user(
         username=employee.email,
         email=employee.email,
-        password=temporary_password,
         first_name=employee.first_name,
         last_name=employee.last_name,
     )
@@ -165,9 +156,11 @@ def _create_employee_user_account(*, employee):
         phone=employee.phone,
         organization=employee.organization,
         employee=employee,
-        must_change_password=True,
+        must_change_password=False,
     )
-    _send_employee_invite_email(employee=employee, temporary_password=temporary_password)
+    user.set_unusable_password()
+    user.save(update_fields=['password'])
+    _send_employee_invite_email(employee=employee, user=user)
     return user
 
 

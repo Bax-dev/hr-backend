@@ -3,6 +3,7 @@ import re
 
 from hr_app_backend.utils.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 from hr_app_backend.employees.models import Employee
+from hr_app_backend.authentication.models import UserProfile
 
 from ..models import Department
 
@@ -12,6 +13,8 @@ def _require_organization(user):
     organization = getattr(profile, 'organization', None) if profile else None
     if organization is None:
         raise PermissionDeniedError('A company account is required to manage departments.')
+    if getattr(profile, 'account_type', None) != UserProfile.ACCOUNT_TYPE_COMPANY:
+        raise PermissionDeniedError('Only company administrators can manage departments.')
     return organization
 
 

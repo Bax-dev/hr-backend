@@ -9,7 +9,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 from hr_app_backend.authentication.serializers import parse_json_body
-from hr_app_backend.authentication.services import get_user_by_token
+from hr_app_backend.authentication.services import get_user_by_token, validate_employee_invite
 from hr_app_backend.authentication.views.helpers import error_response, token_from_request
 from hr_app_backend.utils.env import get_env
 from hr_app_backend.utils.errors import AppError, AuthenticationError, ValidationError
@@ -44,17 +44,36 @@ def _public_url(*, cloud_name: str, resource_type: str, key: str) -> str:
 @require_http_methods(['POST'])
 def upload_presign_view(request):
     try:
-        _require_user(request)
         payload = parse_json_body(request)
+        invite_token = str(payload.get('invite_token') or '').strip()
+        if invite_token:
+            validate_employee_invite(invite_token)
+        else:
+            _require_user(request)
 
         filename = str(payload.get('filename') or '').strip()
         content_type = str(payload.get('content_type') or payload.get('contentType') or '').strip()
+        file_size = payload.get('file_size', payload.get('fileSize'))
         folder = str(payload.get('folder') or '').strip().strip('/')
+        if invite_token and folder != 'employee-avatars':
+            raise ValidationError('Employee invitations may only upload profile pictures.')
 
         if not filename:
             raise ValidationError('Filename is required.')
         if not content_type:
             raise ValidationError('Content type is required.')
+        if content_type.startswith('image/'):
+            allowed_image_types = {'image/jpeg', 'image/png', 'image/webp', 'image/gif'}
+            if content_type not in allowed_image_types:
+                raise ValidationError('Unsupported image type. Use PNG, JPG, WEBP, or GIF.')
+            try:
+                image_size = int(file_size)
+            except (TypeError, ValueError) as exc:
+                raise ValidationError('Image file size is required.') from exc
+            if image_size <= 0:
+                raise ValidationError('Image file size must be greater than zero.')
+            if image_size > 5 * 1024 * 1024:
+                raise ValidationError('Image must not exceed 5 MB.')
 
         cloud_name = get_env('CLOUDINARY_CLOUD_NAME', '')
         api_key = get_env('CLOUDINARY_API_KEY', '')

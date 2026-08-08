@@ -107,3 +107,24 @@ When you finish working, deactivate the virtual environment with:
 ```bash
 deactivate
 ```
+# Bulk employee notification emails
+
+Company administrators can create an in-app notification and queue an email for every active employee:
+
+```http
+POST /api/v1/notifications/bulk/
+Authorization: Bearer <token>
+Content-Type: application/json
+
+{"title":"Office closure","body":"The office will be closed on Friday."}
+```
+
+Pass `employeeIds` as an optional array to target selected active employees. The endpoint returns `202 Accepted` with a campaign ID. Delivery progress is available from `GET /api/v1/notifications/bulk/<campaign-id>/`.
+
+Run the durable queue worker as a separate process:
+
+```bash
+python manage.py process_notification_emails
+```
+
+Use `--batch-size 100` to tune each claim or `--once` for a scheduler/cron deployment. Failed deliveries are retried three times with exponential backoff; each recipient gets an individual email to prevent address disclosure.

@@ -1,7 +1,7 @@
 def serialize_subscription(subscription):
     return {
         'id': str(subscription.id),
-        'organization_id': str(subscription.organization_id),
+        'organization_id': str(subscription.organization_id) if subscription.organization_id else None,
         'created_by_id': str(subscription.created_by_id),
         'plan': subscription.plan,
         'provider': subscription.provider,

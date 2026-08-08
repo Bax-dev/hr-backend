@@ -8,7 +8,7 @@ from django.db.models import Count, Q
 from hr_app_backend.departments.models import Department
 from hr_app_backend.utils.errors import ConflictError, NotFoundError, ValidationError
 
-from .employees import _clean_date, _clean_text, _require_organization, get_employee
+from .employees import _clean_date, _clean_text, _require_company_account, get_employee, get_my_employee
 from ..models import (
     Designation,
     Employee,
@@ -57,7 +57,7 @@ def _get_department(organization, department_id):
 
 
 def _get_team(user, team_pk):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     try:
         return Team.objects.select_related('department').get(organization=organization, pk=team_pk)
     except Team.DoesNotExist as exc:
@@ -65,7 +65,7 @@ def _get_team(user, team_pk):
 
 
 def _get_designation(user, designation_pk):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     try:
         return Designation.objects.get(organization=organization, pk=designation_pk)
     except Designation.DoesNotExist as exc:
@@ -78,7 +78,7 @@ def _ensure_team_department(team, department):
 
 
 def list_teams(user, *, search=None, department_id=None):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     queryset = Team.objects.filter(organization=organization).select_related('department').annotate(member_count=Count('members'))
     if search:
         queryset = queryset.filter(Q(name__icontains=search) | Q(lead__icontains=search))
@@ -89,7 +89,7 @@ def list_teams(user, *, search=None, department_id=None):
 
 @transaction.atomic
 def create_team(user, data):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     name = _clean_text(data.get('name'))
     if len(name) < 2:
         raise ValidationError('Team name is required.')
@@ -137,7 +137,7 @@ def delete_team(user, team_pk):
 
 
 def list_designations(user, *, search=None):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     queryset = Designation.objects.filter(organization=organization).annotate(employee_count=Count('employees'))
     if search:
         queryset = queryset.filter(Q(title__icontains=search) | Q(level__icontains=search))
@@ -146,7 +146,7 @@ def list_designations(user, *, search=None):
 
 @transaction.atomic
 def create_designation(user, data):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     title = _clean_text(data.get('title'))
     if len(title) < 2:
         raise ValidationError('Designation title is required.')
@@ -189,7 +189,7 @@ def delete_designation(user, designation_pk):
 
 
 def build_people_summary(user):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     return {
         'employees': Employee.objects.filter(organization=organization).count(),
         'active_employees': Employee.objects.filter(organization=organization, status=Employee.STATUS_ACTIVE).count(),
@@ -200,7 +200,7 @@ def build_people_summary(user):
 
 
 def build_organization_chart(user):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
     employees = list(
         Employee.objects.filter(organization=organization)
         .select_related('manager_employee', 'team', 'designation', 'department_record')
@@ -404,14 +404,22 @@ def _get_document(employee, document_pk):
         raise NotFoundError('Employee document not found.') from exc
 
 
+def _get_document_employee(user, employee_pk):
+    """Allow administrators, or a staff member accessing their own documents."""
+    own_employee = get_my_employee(user)
+    if own_employee is not None and str(own_employee.pk) == str(employee_pk):
+        return own_employee
+    return get_employee(user, employee_pk)
+
+
 def list_employee_documents(user, employee_pk):
-    employee = get_employee(user, employee_pk)
+    employee = _get_document_employee(user, employee_pk)
     return employee.documents.all()
 
 
 @transaction.atomic
 def create_employee_document(user, employee_pk, data):
-    employee = get_employee(user, employee_pk)
+    employee = _get_document_employee(user, employee_pk)
     title = _clean_text(data.get('title'))
     document_type = _clean_text(data.get('document_type'))
     if len(title) < 2:
@@ -438,7 +446,7 @@ def create_employee_document(user, employee_pk, data):
 
 @transaction.atomic
 def update_employee_document(user, employee_pk, document_pk, data):
-    employee = get_employee(user, employee_pk)
+    employee = _get_document_employee(user, employee_pk)
     document = _get_document(employee, document_pk)
 
     if 'title' in data:
@@ -469,7 +477,7 @@ def update_employee_document(user, employee_pk, document_pk, data):
 
 
 def delete_employee_document(user, employee_pk, document_pk):
-    employee = get_employee(user, employee_pk)
+    employee = _get_document_employee(user, employee_pk)
     _get_document(employee, document_pk).delete()
 
 

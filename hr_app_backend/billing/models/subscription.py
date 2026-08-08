@@ -10,11 +10,15 @@ class Subscription(TimeStampedModel):
     PLAN_STARTER = 'starter'
     PLAN_GROWTH = 'growth'
     PLAN_ENTERPRISE = 'enterprise'
+    PLAN_INDIVIDUAL_ESSENTIAL = 'essential_2000'
+    PLAN_INDIVIDUAL_PREMIUM = 'premium'
     PLAN_CHOICES = [
         (PLAN_FREE_TRIAL, 'Free Trial'),
         (PLAN_STARTER, 'Starter'),
         (PLAN_GROWTH, 'Growth'),
         (PLAN_ENTERPRISE, 'Enterprise'),
+        (PLAN_INDIVIDUAL_ESSENTIAL, 'Individual Essential'),
+        (PLAN_INDIVIDUAL_PREMIUM, 'Individual Premium'),
     ]
 
     PROVIDER_PAYSTACK = 'paystack'
@@ -37,7 +41,7 @@ class Subscription(TimeStampedModel):
         (STATUS_EXPIRED, 'Expired'),
     ]
 
-    organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='subscriptions')
+    organization = models.ForeignKey(Organization, null=True, blank=True, on_delete=models.CASCADE, related_name='subscriptions')
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='subscriptions')
     plan = models.CharField(max_length=20, choices=PLAN_CHOICES)
     provider = models.CharField(max_length=20, choices=PROVIDER_CHOICES)
@@ -63,4 +67,5 @@ class Subscription(TimeStampedModel):
         ordering = ['-created_at']
 
     def __str__(self):
-        return f'{self.organization.name} - {self.plan} ({self.reference})'
+        owner = self.organization.name if self.organization else self.created_by.email
+        return f'{owner} - {self.plan} ({self.reference})'

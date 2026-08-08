@@ -3,6 +3,7 @@ import datetime
 from django.db import transaction
 
 from hr_app_backend.employees.models import Employee
+from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.utils import local_now, today_local
 from hr_app_backend.utils.errors import (
     ConflictError,
@@ -26,6 +27,14 @@ def _require_organization(user):
     return organization
 
 
+def _require_company_account(user):
+    organization = _require_organization(user)
+    profile = getattr(user, 'profile', None)
+    if getattr(profile, 'account_type', None) != UserProfile.ACCOUNT_TYPE_COMPANY:
+        raise PermissionDeniedError('Only company administrators can manage attendance locations.')
+    return organization
+
+
 def _clean_status(value):
     status = str(value).strip().lower().replace(' ', '_').replace('-', '_')
     valid = {choice for choice, _ in AttendanceRecord.STATUSES}
@@ -42,6 +51,12 @@ def _clean_date(value):
 
 
 def _resolve_employee(user, organization):
+    profile = getattr(user, 'profile', None)
+    linked_employee = getattr(profile, 'employee', None) if profile else None
+    if linked_employee is not None and linked_employee.organization_id == organization.id:
+        if linked_employee.status == Employee.STATUS_TERMINATED:
+            raise NotFoundError('Your linked employee record is no longer active.')
+        return linked_employee
     employee = (
         Employee.objects.filter(organization=organization, email__iexact=user.email)
         .exclude(status=Employee.STATUS_TERMINATED)
@@ -87,6 +102,12 @@ def list_attendance(user, date=None, status=None, employee_id=None):
     queryset = AttendanceRecord.objects.select_related('employee', 'location').filter(
         organization=organization
     )
+
+    # Staff accounts may only view their own attendance. Their auth user ID and
+    # employee ID are different values, so resolve the linked employee by email.
+    profile = getattr(user, 'profile', None)
+    if getattr(profile, 'account_type', None) == 'individual':
+        queryset = queryset.filter(employee=_resolve_employee(user, organization))
 
     if date:
         queryset = queryset.filter(date=_clean_date(date))
@@ -143,7 +164,7 @@ def _clean_radius(value):
 
 @transaction.atomic
 def create_location(user, data):
-    organization = _require_organization(user)
+    organization = _require_company_account(user)
 
     name = str(data.get('name') or '').strip()
     if not name:
@@ -167,6 +188,7 @@ def create_location(user, data):
 
 @transaction.atomic
 def update_location(user, location_id, data):
+    _require_company_account(user)
     location = get_location(user, location_id)
 
     if data.get('name') is not None:
@@ -192,6 +214,7 @@ def deactivate_location(user, location_id):
     # Soft delete: attendance records reference the location via SET_NULL, so
     # deactivating preserves historical check-in data while removing it from the
     # active list used for check-in and settings.
+    _require_company_account(user)
     location = get_location(user, location_id)
     location.is_active = False
     location.save(update_fields=['is_active', 'updated_at'])

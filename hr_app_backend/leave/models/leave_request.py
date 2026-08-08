@@ -37,6 +37,7 @@ class LeaveRequest(TimeStampedModel):
     end_date = models.DateField()
     days = models.PositiveIntegerField(default=1)
     reason = models.TextField()
+    rejection_reason = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PENDING)
     reviewed_at = models.DateTimeField(null=True, blank=True)
 

@@ -22,6 +22,16 @@ def _require_organization(user):
     return organization
 
 
+def _is_individual(user):
+    profile = getattr(user, 'profile', None)
+    return getattr(profile, 'account_type', None) == UserProfile.ACCOUNT_TYPE_INDIVIDUAL
+
+
+def _linked_employee(user):
+    profile = getattr(user, 'profile', None)
+    return getattr(profile, 'employee', None) if profile else None
+
+
 def _clean_date(value, field_name):
     if isinstance(value, datetime.date):
         return value
@@ -85,9 +95,15 @@ def list_leaves(user, status=None, employee_id=None):
     organization = _require_organization(user)
     queryset = LeaveRequest.objects.select_related('employee').filter(organization=organization)
 
+    if _is_individual(user):
+        employee = _linked_employee(user)
+        if employee is None:
+            return queryset.none()
+        queryset = queryset.filter(employee=employee)
+
     if status:
         queryset = queryset.filter(status=_clean_status(status))
-    if employee_id:
+    if employee_id and not _is_individual(user):
         queryset = queryset.filter(employee_id=employee_id)
 
     return queryset
@@ -95,8 +111,14 @@ def list_leaves(user, status=None, employee_id=None):
 
 def get_leave(user, leave_pk):
     organization = _require_organization(user)
+    queryset = LeaveRequest.objects.select_related('employee').filter(organization=organization)
+    if _is_individual(user):
+        employee = _linked_employee(user)
+        if employee is None:
+            raise NotFoundError('Leave request not found.')
+        queryset = queryset.filter(employee=employee)
     try:
-        return LeaveRequest.objects.select_related('employee').get(organization=organization, pk=leave_pk)
+        return queryset.get(pk=leave_pk)
     except LeaveRequest.DoesNotExist as exc:
         raise NotFoundError('Leave request not found.') from exc
 
@@ -113,6 +135,7 @@ def create_leave(user, data):
     start_date = _clean_date(data['start_date'], 'Start date')
     end_date = _clean_date(data['end_date'], 'End date')
 
+    status = LeaveRequest.STATUS_PENDING if _is_individual(user) else _clean_status(data.get('status'))
     return LeaveRequest.objects.create(
         organization=organization,
         employee=employee,
@@ -121,13 +144,15 @@ def create_leave(user, data):
         end_date=end_date,
         days=_calculate_days(start_date, end_date),
         reason=(data.get('reason') or '').strip(),
-        status=_clean_status(data.get('status')),
-        reviewed_at=local_now() if _clean_status(data.get('status')) != LeaveRequest.STATUS_PENDING else None,
+        status=status,
+        reviewed_at=local_now() if status != LeaveRequest.STATUS_PENDING else None,
     )
 
 
 @transaction.atomic
 def update_leave(user, leave_pk, data):
+    if _is_individual(user):
+        raise PermissionDeniedError('Only company administrators can review or edit leave requests.')
     leave = get_leave(user, leave_pk)
     previous_status = leave.status
 
@@ -158,6 +183,12 @@ def update_leave(user, leave_pk, data):
         leave.status = _clean_status(data['status'])
         leave.reviewed_at = None if leave.status == LeaveRequest.STATUS_PENDING else local_now()
 
+    if 'rejection_reason' in data:
+        leave.rejection_reason = (data['rejection_reason'] or '').strip()
+
+    if leave.status != LeaveRequest.STATUS_REJECTED:
+        leave.rejection_reason = ''
+
     leave.save()
 
     # Notify the employee when a manager decides on their request. Only fire on
@@ -173,8 +204,17 @@ def update_leave(user, leave_pk, data):
             body=(
                 f'Your {leave.get_leave_type_display()} leave from {leave.start_date} '
                 f'to {leave.end_date} was {leave.get_status_display().lower()}.'
+                + (f' Reason: {leave.rejection_reason}' if leave.rejection_reason else '')
             ),
             category='Leave',
         )
 
     return leave
+
+
+@transaction.atomic
+def delete_leave(user, leave_pk):
+    leave = get_leave(user, leave_pk)
+    if _is_individual(user) and leave.status != LeaveRequest.STATUS_PENDING:
+        raise PermissionDeniedError('Only pending leave requests can be cancelled.')
+    leave.delete()

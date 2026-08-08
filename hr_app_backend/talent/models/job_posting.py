@@ -14,6 +14,7 @@ class JobPosting(models.Model):
     applicants = models.PositiveIntegerField(default=0)
     posted_date = models.DateTimeField(auto_now_add=True)
     description = models.TextField(blank=True)
+    application_email = models.EmailField(blank=True)
 
     class Meta:
         ordering = ['-posted_date', '-id']

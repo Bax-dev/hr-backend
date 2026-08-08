@@ -1,4 +1,6 @@
 from django.db import transaction
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 
 from hr_app_backend.departments.models import Department
 from hr_app_backend.utils.errors import NotFoundError, ValidationError
@@ -52,6 +54,17 @@ def _normalize_department(organization, department_name):
     return matched.name
 
 
+def _normalize_application_email(value):
+    email = clean_text(value)
+    if not email:
+        raise ValidationError('Application email is required.')
+    try:
+        validate_email(email)
+    except DjangoValidationError as exc:
+        raise ValidationError('Enter a valid application email address.') from exc
+    return email
+
+
 @transaction.atomic
 def create_job(user, data):
     organization = require_organization(user)
@@ -71,6 +84,7 @@ def create_job(user, data):
         type=job_type,
         status=status,
         description=clean_text(data.get('description')),
+        application_email=_normalize_application_email(data.get('application_email')),
     )
 
 
@@ -82,6 +96,8 @@ def update_job(user, job_id, data):
             setattr(job, field, clean_text(data.get(field)))
     if 'department' in data:
         job.department = _normalize_department(job.organization, data.get('department'))
+    if 'application_email' in data:
+        job.application_email = _normalize_application_email(data.get('application_email'))
     if not all([job.title, job.department, job.location, job.type, job.status]):
         raise ValidationError('Title, department, location, employment type, and status are required.')
     job.save()

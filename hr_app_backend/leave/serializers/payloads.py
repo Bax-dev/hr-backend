@@ -11,6 +11,7 @@ LEAVE_FIELDS = [
     ('start_date', 'start_date', 'startDate'),
     ('end_date', 'end_date', 'endDate'),
     ('reason', 'reason'),
+    ('rejection_reason', 'rejection_reason', 'rejectionReason'),
     ('status', 'status'),
 ]
 

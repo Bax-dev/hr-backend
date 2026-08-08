@@ -1,5 +1,6 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from uuid import UUID
 
 from django.db.models import Sum
 from django.http import JsonResponse
@@ -19,7 +20,8 @@ from hr_app_backend.utils.errors import AppError, NotFoundError, PermissionDenie
 from hr_app_backend.utils.idempotency import idempotent
 from hr_app_backend.utils.throttles import throttle_view
 
-from .models import Announcement, Notification, PayrollRecord, PlatformRecord
+from .bulk_notifications import enqueue_bulk_notification
+from .models import Announcement, BulkNotification, Notification, PayrollRecord, PersonalGoal, PlatformRecord
 from .notifications_service import create_notification
 
 PLATFORM_MODULE_CONFIG = {
@@ -32,7 +34,16 @@ PLATFORM_MODULE_CONFIG = {
     'integrations': {'list_key': 'integrations', 'item_key': 'integration'},
     'admin-controls': {'list_key': 'controls', 'item_key': 'control'},
     'dashboards': {'list_key': 'dashboards', 'item_key': 'dashboard'},
+    'inventory': {'list_key': 'inventory', 'item_key': 'item'},
 }
+
+INVENTORY_REMOVED_FIELDS = {'assetType', 'assettype', 'images'}
+
+
+def _clean_platform_payload(module, payload):
+    if module != 'inventory':
+        return payload
+    return {key: value for key, value in payload.items() if key not in INVENTORY_REMOVED_FIELDS}
 
 DASHBOARD_STAT_COLORS = {
     'totalEmployees': {'accent': '#6F54FF', 'background': '#F2EDFF'},
@@ -56,6 +67,114 @@ def _organization_for(request):
 def _is_individual_account(user):
     profile = getattr(user, 'profile', None)
     return getattr(profile, 'account_type', None) == UserProfile.ACCOUNT_TYPE_INDIVIDUAL
+
+
+def _personal_user(request):
+    user = require_user(request)
+    if not _is_individual_account(user):
+        raise PermissionDeniedError('Personal workspace tools are available to individual accounts only.')
+    return user
+
+
+def _serialize_personal_goal(goal):
+    return {
+        'id': str(goal.id),
+        'title': goal.title,
+        'completed': goal.completed,
+        'priority': goal.priority,
+        'category': goal.category,
+        'dueDate': goal.due_date.isoformat() if goal.due_date else None,
+        'completedAt': goal.completed_at.isoformat() if goal.completed_at else None,
+        'createdAt': goal.created_at.isoformat(),
+        'updatedAt': goal.updated_at.isoformat(),
+    }
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def personal_workspace_view(request):
+    try:
+        user = _personal_user(request)
+        goals = PersonalGoal.objects.filter(user=user)
+        return JsonResponse({'success': True, 'data': {
+            'goals': [_serialize_personal_goal(goal) for goal in goals],
+        }})
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def personal_goals_view(request):
+    try:
+        user = _personal_user(request)
+        payload = parse_json_body(request)
+        title = str(payload.get('title', '')).strip()
+        if not title:
+            raise ValidationError('Goal title is required.')
+        if len(title) > 255:
+            raise ValidationError('Goal title cannot exceed 255 characters.')
+        profile = user.profile
+        priority = str(payload.get('priority', PersonalGoal.PRIORITY_MEDIUM)).strip().lower()
+        category = str(payload.get('category', '')).strip()
+        due_date_value = str(payload.get('due_date', '')).strip()
+        if priority not in dict(PersonalGoal.PRIORITIES):
+            raise ValidationError('Priority must be low, medium, or high.')
+        if len(category) > 80:
+            raise ValidationError('Category cannot exceed 80 characters.')
+        try:
+            due_date = date.fromisoformat(due_date_value) if due_date_value else None
+        except ValueError as exc:
+            raise ValidationError('Due date must be a valid date.') from exc
+        plan = profile.individual_plan or UserProfile.INDIVIDUAL_PLAN_FREE
+        if plan == UserProfile.INDIVIDUAL_PLAN_FREE and (due_date or category or priority != PersonalGoal.PRIORITY_MEDIUM):
+            raise PermissionDeniedError('Priority and due-date planning require Essential or Premium.')
+        if plan != UserProfile.INDIVIDUAL_PLAN_PREMIUM and category:
+            raise PermissionDeniedError('Custom goal categories require Premium.')
+        goal_limits = {
+            UserProfile.INDIVIDUAL_PLAN_FREE: 3,
+            UserProfile.INDIVIDUAL_PLAN_ESSENTIAL: 25,
+            UserProfile.INDIVIDUAL_PLAN_PREMIUM: None,
+        }
+        limit = goal_limits.get(profile.individual_plan or UserProfile.INDIVIDUAL_PLAN_FREE, 3)
+        active_count = PersonalGoal.objects.filter(user=user, completed=False).count()
+        if limit is not None and active_count >= limit:
+            raise PermissionDeniedError(
+                f'Your {profile.get_individual_plan_display() or "Free"} plan allows up to {limit} active goals.'
+            )
+        goal = PersonalGoal.objects.create(user=user, title=title, priority=priority, category=category, due_date=due_date)
+        return JsonResponse({'success': True, 'data': {'goal': _serialize_personal_goal(goal)}}, status=201)
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['PATCH', 'DELETE'])
+def personal_goal_detail_view(request, goal_pk):
+    try:
+        user = _personal_user(request)
+        try:
+            goal = PersonalGoal.objects.get(user=user, pk=goal_pk)
+        except PersonalGoal.DoesNotExist as exc:
+            raise NotFoundError('Personal goal not found.') from exc
+        if request.method == 'DELETE':
+            goal.delete()
+            return JsonResponse({'success': True, 'message': 'Personal goal deleted.'})
+        payload = parse_json_body(request)
+        if 'title' in payload:
+            title = str(payload['title']).strip()
+            if not title or len(title) > 255:
+                raise ValidationError('Goal title must be between 1 and 255 characters.')
+            goal.title = title
+        if 'completed' in payload:
+            if not isinstance(payload['completed'], bool):
+                raise ValidationError('Completed must be true or false.')
+            goal.completed = payload['completed']
+            goal.completed_at = timezone.now() if goal.completed else None
+        goal.save()
+        return JsonResponse({'success': True, 'data': {'goal': _serialize_personal_goal(goal)}})
+    except AppError as exc:
+        return error_response(exc)
 
 
 def _require_company_account(user):
@@ -851,7 +970,7 @@ def payroll_run_view(request):
 
 
 def _serialize_platform_record(record):
-    payload = dict(record.payload)
+    payload = _clean_platform_payload(record.module, dict(record.payload))
     payload['id'] = str(record.id)
     if record.module == 'approvals':
         payload['updatedAt'] = record.updated_at.isoformat() if record.updated_at else None
@@ -876,7 +995,11 @@ def _list_response(module, organization):
 
 def _create_response(module, organization, payload):
     config = PLATFORM_MODULE_CONFIG[module]
-    record = PlatformRecord.objects.create(module=module, organization=organization, payload=payload)
+    record = PlatformRecord.objects.create(
+        module=module,
+        organization=organization,
+        payload=_clean_platform_payload(module, payload),
+    )
     return JsonResponse({'success': True, 'data': {config['item_key']: _serialize_platform_record(record)}}, status=201)
 
 
@@ -886,7 +1009,7 @@ def _detail_response(module, organization, record_pk, payload=None):
     if payload is not None:
         updated = dict(record.payload)
         updated.update(payload)
-        record.payload = updated
+        record.payload = _clean_platform_payload(module, updated)
         record.save(update_fields=['payload', 'updated_at'])
     return JsonResponse({'success': True, 'data': {config['item_key']: _serialize_platform_record(record)}})
 
@@ -897,14 +1020,16 @@ def _delete_response(module, organization, record_pk):
 
 
 def _collection_view(request, module):
-    _, organization = _organization_for(request)
+    user, organization = _organization_for(request)
+    _require_company_account(user)
     if request.method == 'GET':
         return _list_response(module, organization)
     return _create_response(module, organization, parse_json_body(request))
 
 
 def _detail_view(request, module, record_pk):
-    _, organization = _organization_for(request)
+    user, organization = _organization_for(request)
+    _require_company_account(user)
     if request.method == 'DELETE':
         return _delete_response(module, organization, record_pk)
     return _detail_response(module, organization, record_pk, parse_json_body(request))
@@ -914,6 +1039,7 @@ def _detail_view(request, module, record_pk):
 def dashboard_overview_view(request):
     try:
         user, organization = _organization_for(request)
+        _require_company_account(user)
         return JsonResponse(_dashboard_overview_payload(user, organization))
     except AppError as exc:
         return error_response(exc)
@@ -922,7 +1048,8 @@ def dashboard_overview_view(request):
 @require_http_methods(['GET'])
 def dashboard_stats_view(request):
     try:
-        _, organization = _organization_for(request)
+        user, organization = _organization_for(request)
+        _require_company_account(user)
         return JsonResponse(_dashboard_stats_payload(organization))
     except AppError as exc:
         return error_response(exc)
@@ -931,7 +1058,8 @@ def dashboard_stats_view(request):
 @require_http_methods(['GET'])
 def dashboard_attendance_trend_view(request):
     try:
-        _, organization = _organization_for(request)
+        user, organization = _organization_for(request)
+        _require_company_account(user)
         return JsonResponse(_attendance_trend_payload(organization), safe=False)
     except AppError as exc:
         return error_response(exc)
@@ -940,7 +1068,8 @@ def dashboard_attendance_trend_view(request):
 @require_http_methods(['GET'])
 def dashboard_recent_activity_view(request):
     try:
-        _, organization = _organization_for(request)
+        user, organization = _organization_for(request)
+        _require_company_account(user)
         return JsonResponse(_recent_activity_payload(organization), safe=False)
     except AppError as exc:
         return error_response(exc)
@@ -1020,6 +1149,15 @@ def ai_features_view(request):
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
+def inventory_view(request):
+    try:
+        return _collection_view(request, 'inventory')
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
 def notifications_view(request):
     try:
         return _collection_view(request, 'notifications')
@@ -1032,6 +1170,72 @@ def notifications_view(request):
 def notification_detail_view(request, record_pk):
     try:
         return _detail_view(request, 'notifications', record_pk)
+    except AppError as exc:
+        return error_response(exc)
+
+
+def _serialize_bulk_notification(campaign):
+    return {
+        'id': str(campaign.id),
+        'title': campaign.title,
+        'body': campaign.body,
+        'status': campaign.status,
+        'recipientCount': campaign.recipient_count,
+        'sentCount': campaign.sent_count,
+        'failedCount': campaign.failed_count,
+        'createdAt': campaign.created_at.isoformat(),
+    }
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def bulk_notification_view(request):
+    """Create inbox notifications and queue one email per active employee."""
+    try:
+        user, organization = _organization_for(request)
+        _require_company_account(user)
+        payload = parse_json_body(request)
+        title = str(payload.get('title', '')).strip()
+        body = str(payload.get('body', '')).strip()
+        employee_ids = payload.get('employeeIds')
+        if not title or len(title) > 255:
+            raise ValidationError('Title is required and cannot exceed 255 characters.')
+        if not body:
+            raise ValidationError('Notification body is required.')
+        if employee_ids is not None:
+            if not isinstance(employee_ids, list) or not all(isinstance(value, str) for value in employee_ids):
+                raise ValidationError('employeeIds must be a list of employee IDs.')
+            try:
+                employee_ids = list(dict.fromkeys(UUID(value) for value in employee_ids))
+            except ValueError as exc:
+                raise ValidationError('One or more employee IDs are invalid.') from exc
+
+        campaign = enqueue_bulk_notification(
+            organization=organization,
+            created_by=user,
+            title=title,
+            body=body,
+            employee_ids=employee_ids,
+        )
+        return JsonResponse(
+            {'success': True, 'message': 'Notification queued for delivery.', 'data': {'campaign': _serialize_bulk_notification(campaign)}},
+            status=202,
+        )
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def bulk_notification_status_view(request, campaign_pk):
+    try:
+        user, organization = _organization_for(request)
+        _require_company_account(user)
+        try:
+            campaign = BulkNotification.objects.get(pk=campaign_pk, organization=organization)
+        except BulkNotification.DoesNotExist as exc:
+            raise NotFoundError('Notification campaign not found.') from exc
+        return JsonResponse({'success': True, 'data': {'campaign': _serialize_bulk_notification(campaign)}})
     except AppError as exc:
         return error_response(exc)
 
@@ -1053,7 +1257,8 @@ def _recipient_for(request):
 
     ``employee`` is ``None`` when the account has no linked employee record.
     """
-    user, organization = _organization_for(request)
+    user = require_user(request)
+    organization = getattr(getattr(user, 'profile', None), 'organization', None)
     return organization, get_my_employee(user)
 
 

@@ -1,4 +1,6 @@
+from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 from hr_app_backend.authentication.models import Organization
 from hr_app_backend.employees.models import Employee
@@ -90,6 +92,68 @@ class Notification(TimeStampedModel):
         return f'{self.title} → {self.recipient}'
 
 
+class BulkNotification(TimeStampedModel):
+    """An admin-created notification campaign and its delivery progress."""
+
+    STATUS_QUEUED = 'queued'
+    STATUS_PROCESSING = 'processing'
+    STATUS_COMPLETED = 'completed'
+    STATUS_COMPLETED_WITH_ERRORS = 'completed_with_errors'
+    STATUSES = [
+        (STATUS_QUEUED, 'Queued'),
+        (STATUS_PROCESSING, 'Processing'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_COMPLETED_WITH_ERRORS, 'Completed with errors'),
+    ]
+
+    organization = models.ForeignKey(
+        Organization, on_delete=models.CASCADE, related_name='bulk_notifications'
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='bulk_notifications'
+    )
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    status = models.CharField(max_length=32, choices=STATUSES, default=STATUS_QUEUED)
+    recipient_count = models.PositiveIntegerField(default=0)
+    sent_count = models.PositiveIntegerField(default=0)
+    failed_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class NotificationEmailJob(TimeStampedModel):
+    """Durable, retryable email work item for one campaign recipient."""
+
+    STATUS_PENDING = 'pending'
+    STATUS_PROCESSING = 'processing'
+    STATUS_SENT = 'sent'
+    STATUS_FAILED = 'failed'
+    STATUSES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_PROCESSING, 'Processing'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+
+    campaign = models.ForeignKey(BulkNotification, on_delete=models.CASCADE, related_name='email_jobs')
+    employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='notification_email_jobs')
+    email = models.EmailField()
+    status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PENDING, db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    available_at = models.DateTimeField(default=timezone.now, db_index=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ['created_at']
+        constraints = [
+            models.UniqueConstraint(fields=['campaign', 'employee'], name='unique_campaign_employee_email_job'),
+        ]
+        indexes = [models.Index(fields=['status', 'available_at'])]
+
+
 class PlatformRecord(TimeStampedModel):
     MODULE_APPROVALS = 'approvals'
     MODULE_COMMUNICATIONS = 'communications'
@@ -100,6 +164,7 @@ class PlatformRecord(TimeStampedModel):
     MODULE_INTEGRATIONS = 'integrations'
     MODULE_ADMIN_CONTROLS = 'admin-controls'
     MODULE_DASHBOARDS = 'dashboards'
+    MODULE_INVENTORY = 'inventory'
     MODULES = [
         (MODULE_APPROVALS, 'Approvals'),
         (MODULE_COMMUNICATIONS, 'Communications'),
@@ -110,6 +175,7 @@ class PlatformRecord(TimeStampedModel):
         (MODULE_INTEGRATIONS, 'Integrations'),
         (MODULE_ADMIN_CONTROLS, 'Admin Controls'),
         (MODULE_DASHBOARDS, 'Dashboards'),
+        (MODULE_INVENTORY, 'Inventory'),
     ]
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='platform_records')
@@ -118,3 +184,20 @@ class PlatformRecord(TimeStampedModel):
 
     class Meta:
         ordering = ['-updated_at', '-created_at']
+
+
+class PersonalGoal(TimeStampedModel):
+    PRIORITY_LOW = 'low'
+    PRIORITY_MEDIUM = 'medium'
+    PRIORITY_HIGH = 'high'
+    PRIORITIES = [(PRIORITY_LOW, 'Low'), (PRIORITY_MEDIUM, 'Medium'), (PRIORITY_HIGH, 'High')]
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='personal_goals')
+    title = models.CharField(max_length=255)
+    completed = models.BooleanField(default=False)
+    priority = models.CharField(max_length=10, choices=PRIORITIES, default=PRIORITY_MEDIUM)
+    category = models.CharField(max_length=80, blank=True)
+    due_date = models.DateField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['completed', '-created_at']

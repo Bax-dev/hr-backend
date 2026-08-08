@@ -4,7 +4,7 @@ from hr_app_backend.utils.errors import ValidationError
 
 
 ALLOWED_PROVIDERS = {'paystack'}
-ALLOWED_PLANS = {'free_trial', 'starter', 'growth', 'enterprise'}
+ALLOWED_PLANS = {'free_trial', 'starter', 'growth', 'enterprise', 'essential_2000', 'premium'}
 
 
 def _value(payload, *keys, default=''):
@@ -34,7 +34,7 @@ def initialize_subscription_payload(payload):
     if provider not in ALLOWED_PROVIDERS:
         raise ValidationError('Provider must be paystack.')
     if plan not in ALLOWED_PLANS:
-        raise ValidationError('Plan must be free_trial, starter, growth, or enterprise.')
+        raise ValidationError('Unsupported subscription plan.')
 
     return {
         'provider': provider,

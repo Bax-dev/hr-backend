@@ -10,7 +10,7 @@ from hr_app_backend.third_parties import (
     get_flutterwave_client,
     get_paystack_client,
 )
-from hr_app_backend.utils import ConflictError, ValidationError, generate_uuid4, timedelta, today_local
+from hr_app_backend.utils import ValidationError, generate_uuid4, timedelta, today_local
 
 PLAN_PRICES = {
     Subscription.PLAN_STARTER: {
@@ -20,6 +20,12 @@ PLAN_PRICES = {
     Subscription.PLAN_GROWTH: {
         'monthly': Decimal('35000.00'),
         'annual': Decimal('350000.00'),
+    },
+    Subscription.PLAN_INDIVIDUAL_ESSENTIAL: {
+        'monthly': Decimal('2000.00'),
+    },
+    Subscription.PLAN_INDIVIDUAL_PREMIUM: {
+        'monthly': Decimal('7000.00'),
     },
 }
 
@@ -152,16 +158,25 @@ def _verify_flutterwave(subscription):
 def initialize_subscription_payment(user, payload):
     profile = getattr(user, 'profile', None)
     organization = getattr(profile, 'organization', None)
-    if organization is None:
-        raise ValidationError('Only organization accounts can create subscriptions.')
-
     plan = payload['plan']
     provider = payload['provider']
     billing_cycle = payload.get('billing_cycle') or 'monthly'
+    is_individual = getattr(profile, 'account_type', None) == 'individual'
+    individual_plans = {Subscription.PLAN_INDIVIDUAL_ESSENTIAL, Subscription.PLAN_INDIVIDUAL_PREMIUM}
+    if is_individual:
+        raise ValidationError('Personal subscriptions are no longer available. Use company signup to choose a plan.')
+    if organization is None:
+        raise ValidationError('A subscription owner is required.')
+    if is_individual and plan not in individual_plans:
+        raise ValidationError('Individual accounts must choose Essential or Premium.')
+    if not is_individual and plan in individual_plans:
+        raise ValidationError('Individual plans are not available to company accounts.')
+    if is_individual and billing_cycle != 'monthly':
+        raise ValidationError('Individual plans are billed monthly.')
     amount = _resolve_amount(plan, payload, billing_cycle=billing_cycle)
     start_date, end_date = _resolve_dates(plan, payload, billing_cycle=billing_cycle)
-    email = (payload.get('email') or user.email or organization.email).strip()
-    customer_name = (payload.get('customer_name') or profile.full_name or organization.name).strip()
+    email = (payload.get('email') or user.email or (organization.email if organization else '')).strip()
+    customer_name = (payload.get('customer_name') or profile.full_name or (organization.name if organization else '')).strip()
     callback_url = (payload.get('callback_url') or '').strip()
 
     if not email:
@@ -172,14 +187,18 @@ def initialize_subscription_payment(user, payload):
         raise ValidationError('Callback URL is required for Paystack payments.')
 
     if plan != Subscription.PLAN_FREE_TRIAL:
+        owner_filter = {'created_by': user} if is_individual else {'organization': organization}
         pending_subscription = Subscription.objects.filter(
-            organization=organization,
+            **owner_filter,
             plan=plan,
             provider=provider,
             status=Subscription.STATUS_PENDING,
         ).order_by('-created_at').first()
         if pending_subscription is not None:
-            raise ConflictError('There is already a pending payment for this plan and provider.')
+            if pending_subscription.payment_url:
+                return pending_subscription
+            pending_subscription.status = Subscription.STATUS_FAILED
+            pending_subscription.save(update_fields=['status', 'updated_at'])
 
     subscription = Subscription.objects.create(
         organization=organization,
@@ -220,11 +239,9 @@ def initialize_subscription_payment(user, payload):
 def verify_subscription_payment(user, payload):
     profile = getattr(user, 'profile', None)
     organization = getattr(profile, 'organization', None)
-    if organization is None:
-        raise ValidationError('Only organization accounts can verify subscriptions.')
-
     try:
-        subscription = Subscription.objects.get(reference=payload['reference'], organization=organization)
+        owner_filter = {'created_by': user} if organization is None else {'organization': organization}
+        subscription = Subscription.objects.get(reference=payload['reference'], **owner_filter)
     except Subscription.DoesNotExist as exc:
         raise ValidationError('Subscription payment reference was not found.') from exc
 
@@ -237,4 +254,10 @@ def verify_subscription_payment(user, payload):
     else:
         response, paid = _verify_flutterwave(subscription)
 
+    if paid and organization is None and subscription.plan in {
+        Subscription.PLAN_INDIVIDUAL_ESSENTIAL,
+        Subscription.PLAN_INDIVIDUAL_PREMIUM,
+    }:
+        profile.individual_plan = subscription.plan
+        profile.save(update_fields=['individual_plan', 'updated_at'])
     return subscription, response, paid

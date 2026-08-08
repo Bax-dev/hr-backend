@@ -3,21 +3,17 @@
 {% block email_content %}
   <p style="margin:0 0 26px;font-size:17px;line-height:1.6;color:#5b5c54;">
     Your employee workspace has been created in <strong style="color:#0f172a;">{{ brand_name }}</strong>.
-    Use the secure sign-in details below to access your dashboard.
+    Use the secure invitation link below to create your password and confirm your profile.
   </p>
 
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 26px;">
     <tr>
       <td>
         <div style="margin:0 0 12px;font-size:12px;font-weight:700;line-height:1;letter-spacing:0.12em;text-transform:uppercase;color:#0529e0;">
-          Sign-in details
+          Invited email
         </div>
         <div style="margin:0 0 10px;font-size:16px;line-height:1.7;color:#5b5c54;">
           <strong style="display:inline-block;min-width:150px;color:#071425;">Email:</strong> {{ recipient_email }}
-        </div>
-        <div style="margin:0;font-size:16px;line-height:1.7;color:#5b5c54;">
-          <strong style="display:inline-block;min-width:150px;color:#071425;">Temporary password:</strong>
-          <span style="font-weight:700;letter-spacing:0.08em;color:#071425;">{{ temporary_password }}</span>
         </div>
       </td>
     </tr>
@@ -26,15 +22,15 @@
   <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
     <tr>
       <td align="center" style="border-radius:6px;background-color:#0529e0;">
-        <a href="{{ login_url }}" style="display:inline-block;padding:14px 24px;font-size:14px;font-weight:700;line-height:1;text-decoration:none;color:#ffffff;">
-          Open employee workspace
+        <a href="{{ invite_url }}" style="display:inline-block;padding:14px 24px;font-size:14px;font-weight:700;line-height:1;text-decoration:none;color:#ffffff;">
+          Complete account setup
         </a>
       </td>
     </tr>
   </table>
 
   <p style="margin:0 0 14px;font-size:16px;line-height:1.65;color:#5b5c54;">
-    The sign-in link above will prefill your email automatically. After your first successful login, you will be required to create a new password before continuing.
+    You can confirm or edit your name, upload a profile picture, and create your password. It expires after 7 days and can only be used once.
   </p>
 
   <p style="margin:0;font-size:16px;line-height:1.65;color:#5b5c54;">

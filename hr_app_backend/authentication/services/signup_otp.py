@@ -55,10 +55,9 @@ def resend_signup_otp(email):
     except User.DoesNotExist as exc:
         raise NotFoundError('No account was found for this email address.') from exc
 
-    profile = getattr(user, 'profile', None)
-    if profile is not None and profile.email_verified:
-        raise ValidationError('This email address is already verified.')
-
+    # A previous verification may have committed successfully while its HTTP
+    # response failed. Sending a fresh code lets the owner recover that signup
+    # session without bypassing proof of access to the email inbox.
     return send_signup_otp(user)
 
 

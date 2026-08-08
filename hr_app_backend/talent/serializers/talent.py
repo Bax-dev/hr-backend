@@ -9,6 +9,7 @@ def serialize_job(job):
         'applicants': job.applicants,
         'postedDate': job.posted_date.isoformat(),
         'description': job.description or None,
+        'applicationEmail': job.application_email or None,
     }
 
 
@@ -29,7 +30,6 @@ def serialize_performance(review):
         'id': str(review.id),
         'employeeName': review.employee_name,
         'reviewCycle': review.review_cycle,
-        'owner': review.owner,
         'priority': review.priority,
         'status': review.status,
         'notes': review.notes or None,

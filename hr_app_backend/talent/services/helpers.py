@@ -1,5 +1,6 @@
 import datetime
 
+from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.utils.errors import NotFoundError, PermissionDeniedError, ValidationError
 
 
@@ -8,6 +9,8 @@ def require_organization(user):
     organization = getattr(profile, 'organization', None) if profile else None
     if organization is None:
         raise PermissionDeniedError('A company account is required to manage talent modules.')
+    if getattr(profile, 'account_type', None) != UserProfile.ACCOUNT_TYPE_COMPANY:
+        raise PermissionDeniedError('Only company administrators can manage talent modules.')
     return organization
 
 
