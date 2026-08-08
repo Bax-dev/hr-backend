@@ -142,6 +142,16 @@ resource "aws_cloudfront_distribution" "frontend" {
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend[each.key].id
 
   }
+  origin {
+    domain_name = aws_lb.this[each.key].dns_name
+    origin_id   = "api"
+    custom_origin_config {
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
+    }
+  }
   default_cache_behavior {
     target_origin_id       = "s3"
     viewer_protocol_policy = "redirect-to-https"
@@ -157,6 +167,23 @@ resource "aws_cloudfront_distribution" "frontend" {
     default_ttl = 3600
     max_ttl     = 86400
 
+  }
+  ordered_cache_behavior {
+    path_pattern           = "/api/*"
+    target_origin_id       = "api"
+    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods        = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
+    cached_methods         = ["GET", "HEAD"]
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+    forwarded_values {
+      query_string = true
+      headers      = ["*"]
+      cookies {
+        forward = "all"
+      }
+    }
   }
   custom_error_response {
     error_code         = 403
@@ -499,7 +526,7 @@ resource "aws_ecs_task_definition" "backend" {
     }],
     environment = [
       {
-        name = "DJANGO_ALLOWED_HOSTS", value = aws_lb.this[each.key].dns_name
+        name = "DJANGO_ALLOWED_HOSTS", value = "${aws_lb.this[each.key].dns_name},${aws_cloudfront_distribution.frontend[each.key].domain_name}"
         }, {
         name = "DJANGO_DEBUG", value = "false"
       },
