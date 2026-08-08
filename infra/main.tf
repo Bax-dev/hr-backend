@@ -324,6 +324,88 @@ resource "aws_ecr_repository" "backend" {
     scan_on_push = true
   }
 }
+
+resource "aws_iam_role" "codebuild" {
+  name = "${var.project}-codebuild"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "codebuild.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy" "codebuild" {
+  role = aws_iam_role.codebuild.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+resource "aws_codebuild_project" "backend_bootstrap" {
+  name         = "${var.project}-backend-bootstrap"
+  service_role = aws_iam_role.codebuild.arn
+
+  source {
+    type            = "GITHUB"
+    location        = "https://github.com/${var.github_owner}/${var.backend_repository}.git"
+    git_clone_depth = 1
+    buildspec       = <<-YAML
+      version: 0.2
+      phases:
+        pre_build:
+          commands:
+            - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+        build:
+          commands:
+            - docker build -t $REPOSITORY_URI:prod -t $REPOSITORY_URI:staging .
+        post_build:
+          commands:
+            - docker push $REPOSITORY_URI:prod
+            - docker push $REPOSITORY_URI:staging
+    YAML
+  }
+
+  artifacts { type = "NO_ARTIFACTS" }
+  environment {
+    compute_type                = "BUILD_GENERAL1_SMALL"
+    image                       = "aws/codebuild/standard:7.0"
+    type                        = "LINUX_CONTAINER"
+    image_pull_credentials_type = "CODEBUILD"
+    privileged_mode             = true
+    environment_variable {
+      name  = "AWS_ACCOUNT_ID"
+      value = data.aws_caller_identity.current.account_id
+    }
+    environment_variable {
+      name  = "REPOSITORY_URI"
+      value = aws_ecr_repository.backend.repository_url
+    }
+  }
+}
 resource "aws_ecs_cluster" "this" {
   for_each = local.environments
   name     = "${var.project}-${each.key}"
