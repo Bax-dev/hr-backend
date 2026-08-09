@@ -2,6 +2,9 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 data "aws_caller_identity" "current" {}
+data "aws_secretsmanager_secret" "resend_api_key" {
+  name = "workiva/resend-api-key"
+}
 
 locals {
   environments = toset(["staging", "prod"])
@@ -478,6 +481,17 @@ resource "aws_iam_role_policy_attachment" "ecs_execution" {
   role       = aws_iam_role.ecs_execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+resource "aws_iam_role_policy" "ecs_execution_secrets" {
+  role = aws_iam_role.ecs_execution.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = data.aws_secretsmanager_secret.resend_api_key.arn
+    }]
+  })
+}
 resource "aws_iam_role" "ecs_task" {
   name = "${var.project}-ecs-task"
   assume_role_policy = jsonencode({
@@ -497,6 +511,14 @@ resource "aws_iam_role_policy" "ecs_task" {
       },
       {
         Effect = "Allow", Action = ["sqs:SendMessage", "sqs:ReceiveMessage", "sqs:DeleteMessage", "sqs:GetQueueAttributes"], Resource = concat([for q in aws_sqs_queue.mail : q.arn], [for q in aws_sqs_queue.mail_dlq : q.arn])
+      },
+      {
+        Effect = "Allow"
+        Action = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+        Resource = [
+          "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/us.amazon.nova-pro-v1:0",
+          "arn:aws:bedrock:*::foundation-model/amazon.nova-pro-v1:0"
+        ]
       }
     ]
   })
@@ -577,9 +599,17 @@ resource "aws_ecs_task_definition" "backend" {
       {
         name = "AWS_REGION", value = var.aws_region
         }, {
+        name = "AI_ASSISTANT_ENABLED", value = "true"
+        }, {
+        name = "BEDROCK_MODEL_ID", value = "us.amazon.nova-pro-v1:0"
+        }, {
         name = "EMAIL_LOGO_URL", value = "https://${each.key == "prod" ? var.domain_name : "staging.${var.domain_name}"}/transparent-logo-mark.png"
       }
     ],
+    secrets = [{
+      name      = "RESEND_API_KEY"
+      valueFrom = data.aws_secretsmanager_secret.resend_api_key.arn
+    }],
     logConfiguration = {
       logDriver = "awslogs", options = {
         "awslogs-group" = aws_cloudwatch_log_group.backend[each.key].name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "backend"

@@ -142,6 +142,13 @@ FLUTTERWAVE_SECRET_KEY = get_env('FLUTTERWAVE_SECRET_KEY', '')
 FLUTTERWAVE_PUBLIC_KEY = get_env('FLUTTERWAVE_PUBLIC_KEY', '')
 FLUTTERWAVE_BASE_URL = get_env('FLUTTERWAVE_BASE_URL', 'https://api.flutterwave.com/v3')
 
+# Amazon Bedrock. Credentials are intentionally not configured here: boto3
+# uses the workload's IAM role (or the developer's standard AWS profile).
+AI_ASSISTANT_ENABLED = get_bool('AI_ASSISTANT_ENABLED', default=True)
+AWS_REGION = get_env('AWS_REGION', 'us-east-1')
+BEDROCK_MODEL_ID = get_env('BEDROCK_MODEL_ID', 'us.amazon.nova-pro-v1:0')
+BEDROCK_MAX_TOKENS = get_int('BEDROCK_MAX_TOKENS', 1200)
+
 CSRF_TRUSTED_ORIGINS = get_list('DJANGO_CSRF_TRUSTED_ORIGINS', default=[])
 
 # Default primary key field type

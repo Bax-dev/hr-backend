@@ -5,6 +5,7 @@ from .views import health_check, upload_file_view, upload_presign_view
 app_name = "v1"
 
 urlpatterns = [
+    path('ai/', include('hr_app_backend.ai.urls')),
     path('audit-logs/', include('hr_app_backend.audit_logs.urls')),
     path('attendance/', include('hr_app_backend.attendance.urls')),
     path('auth/', include('hr_app_backend.authentication.urls')),

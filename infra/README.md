@@ -35,6 +35,8 @@ environment protection/required reviewers to `prod` before the first release.
 
 - RDS and Redis are not publicly reachable. ECS tasks run in private subnets and
   use a NAT gateway for outbound dependencies.
+- The backend task role can invoke the US Amazon Nova Pro Bedrock inference
+  profile. Bedrock usage is metered; monitor model-invocation spend and quotas.
 - The default CloudFront hostname and HTTP ALB hostname make initial deployment
   testable. Add Route 53, ACM certificates, and an HTTPS ALB listener before a
   public production launch.

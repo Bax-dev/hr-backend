@@ -10,6 +10,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = []
 
 LOCAL_APPS = [
+    'hr_app_backend.ai',
     'hr_app_backend.api',
     'hr_app_backend.audit_logs',
     'hr_app_backend.attendance',

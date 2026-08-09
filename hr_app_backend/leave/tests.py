@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 
@@ -11,6 +13,10 @@ from .services import create_leave, delete_leave, get_leave, list_leaves, update
 
 class LeaveRoleWorkflowTests(TestCase):
     def setUp(self):
+        email_patcher = patch('hr_app_backend.leave.services.leaves._send_leave_decision_email')
+        self.addCleanup(email_patcher.stop)
+        email_patcher.start()
+
         user_model = get_user_model()
         self.organization = Organization.objects.create(
             name='Workiva Test', email='hr@example.com', phone='12345'
