@@ -9,14 +9,49 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 DEBUG = get_bool("DJANGO_DEBUG", default=False)
-SECRET_KEY = get_env("DJANGO_SECRET_KEY")
-if not SECRET_KEY:
-    if DEBUG:
-        SECRET_KEY = "django-insecure-development-key"
-    else:
-        raise RuntimeError("DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is disabled.")
+
+# Signed tokens (employee invite links, password-reset links, session
+# machinery) derive their HMAC key from SECRET_KEY, so a guessable value lets
+# an attacker forge them. Reject known placeholders and short keys outright
+# instead of silently falling back to one, even in DEBUG.
+_WEAK_SECRET_KEYS = {
+    "", "change-me", "changeme", "secret", "password",
+    "django-insecure-development-key",
+}
+SECRET_KEY = get_env("DJANGO_SECRET_KEY", default="")
+if SECRET_KEY.strip().lower() in _WEAK_SECRET_KEYS or len(SECRET_KEY) < 32:
+    raise RuntimeError(
+        "DJANGO_SECRET_KEY is missing, a known placeholder, or shorter than 32 "
+        "characters. Generate a real secret, e.g.:\n"
+        "  python -c \"from django.core.management.utils import get_random_secret_key; "
+        "print(get_random_secret_key())\""
+    )
 
 ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", default=["127.0.0.1", "localhost"])
+
+# Number of trusted reverse proxies in front of Django that append to
+# X-Forwarded-For (CloudFront + ALB by default). Used to pick the real client
+# IP out of that header instead of trusting its attacker-controlled first hop.
+TRUSTED_PROXY_HOPS = get_int("DJANGO_TRUSTED_PROXY_HOPS", default=2)
+
+# The app sits behind CloudFront -> ALB; CloudFront terminates TLS to the
+# browser but talks to the ALB over HTTP, so Django must be told the original
+# request was HTTPS via this header, or request.is_secure() is always False
+# and SECURE_SSL_REDIRECT would loop.
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# Only enforce HTTPS/HSTS and mark cookies Secure outside local dev, where
+# the app is served over plain http://127.0.0.1.
+SECURE_SSL_REDIRECT = not DEBUG
+SESSION_COOKIE_SECURE = not DEBUG
+CSRF_COOKIE_SECURE = not DEBUG
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+if not DEBUG:
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',

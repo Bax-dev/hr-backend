@@ -7,7 +7,7 @@ from hr_app_backend.utils.throttles import throttle, throttle_view
 
 from ..serializers import forgot_password_payload, reset_password_payload, verify_otp_payload
 from ..services import auth_response, reset_password, send_password_reset_otp, verify_password_reset_otp
-from .helpers import error_response, load_json
+from .helpers import error_response, load_json, session_json_response
 
 
 @csrf_exempt
@@ -52,6 +52,6 @@ def reset_password_view(request):
             payload['password'],
             payload['confirm_password'],
         )
-        return JsonResponse({'success': True, 'data': auth_response(user)})
+        return session_json_response(auth_response(user))
     except AppError as exc:
         return error_response(exc)

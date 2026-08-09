@@ -1,0 +1,32 @@
+{% extends "emails/base_template.html" %}
+
+{% block email_content %}
+  <p style="margin:0 0 26px;font-size:17px;line-height:1.6;color:#5b5c54;">
+    Your <strong style="color:#0f172a;">{{ leave_type }}</strong> leave request has been
+    <strong style="color:#0f172a;">{{ status_label }}</strong>.
+  </p>
+
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 26px;">
+    <tr>
+      <td style="border:1px solid #cbd2da;border-radius:8px;padding:16px 18px;">
+        <div style="margin:0 0 6px;font-size:12px;font-weight:700;line-height:1;letter-spacing:0.12em;text-transform:uppercase;color:#0529e0;">
+          Leave dates
+        </div>
+        <p style="margin:0;font-size:15px;line-height:1.6;color:#071425;">{{ start_date }} &ndash; {{ end_date }} ({{ days }} day{{ days|pluralize }})</p>
+      </td>
+    </tr>
+  </table>
+
+  {% if rejection_reason %}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 26px;">
+      <tr>
+        <td style="border:1px solid #cbd2da;border-radius:8px;padding:16px 18px;">
+          <div style="margin:0 0 6px;font-size:12px;font-weight:700;line-height:1;letter-spacing:0.12em;text-transform:uppercase;color:#0529e0;">
+            Reason
+          </div>
+          <p style="margin:0;font-size:15px;line-height:1.6;color:#071425;">{{ rejection_reason }}</p>
+        </td>
+      </tr>
+    </table>
+  {% endif %}
+{% endblock %}

@@ -124,6 +124,24 @@ resource "aws_s3_bucket_versioning" "app" {
     status = "Enabled"
   }
 }
+resource "aws_s3_bucket_cors_configuration" "app" {
+  for_each = local.environments
+  bucket   = aws_s3_bucket.app[each.key].id
+  cors_rule {
+    allowed_headers = ["*"]
+    allowed_methods = ["PUT"]
+    allowed_origins = [
+      "https://${aws_cloudfront_distribution.frontend[each.key].domain_name}",
+      "https://${var.domain_name}",
+      "https://www.${var.domain_name}",
+      "https://staging.${var.domain_name}",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+    ]
+    expose_headers  = ["ETag"]
+    max_age_seconds = 3600
+  }
+}
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
   for_each                          = local.environments
@@ -136,6 +154,7 @@ resource "aws_cloudfront_distribution" "frontend" {
   for_each            = local.environments
   enabled             = true
   default_root_object = "index.html"
+  aliases             = each.key == "prod" ? [var.domain_name, "www.${var.domain_name}"] : ["staging.${var.domain_name}"]
   origin {
     domain_name              = aws_s3_bucket.frontend[each.key].bucket_regional_domain_name
     origin_id                = "s3"
@@ -201,7 +220,9 @@ resource "aws_cloudfront_distribution" "frontend" {
     }
   }
   viewer_certificate {
-    cloudfront_default_certificate = true
+    acm_certificate_arn      = var.cloudfront_certificate_arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
   }
 }
 resource "aws_s3_bucket_policy" "frontend" {
@@ -555,6 +576,8 @@ resource "aws_ecs_task_definition" "backend" {
       },
       {
         name = "AWS_REGION", value = var.aws_region
+        }, {
+        name = "EMAIL_LOGO_URL", value = "https://${each.key == "prod" ? var.domain_name : "staging.${var.domain_name}"}/transparent-logo-mark.png"
       }
     ],
     logConfiguration = {

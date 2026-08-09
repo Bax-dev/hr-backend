@@ -8,7 +8,7 @@ from hr_app_backend.utils.throttles import throttle, throttle_view
 
 from ..serializers import company_signup_payload, forgot_password_payload, individual_signup_payload, verify_otp_payload
 from ..services import auth_response, register_company, register_individual, resend_signup_otp, verify_signup_otp
-from .helpers import error_response, load_json
+from .helpers import error_response, load_json, session_json_response
 
 
 @csrf_exempt
@@ -44,7 +44,7 @@ def verify_signup_otp_view(request):
         # A short OTP is guessable, so the per-account limit is the real control.
         throttle(request, scope='auth:verify-signup-otp:account', rate='5/min', ident=payload['email'].lower())
         user = verify_signup_otp(payload['email'], payload['otp'])
-        return JsonResponse({'success': True, 'data': auth_response(user)})
+        return session_json_response(auth_response(user))
     except AppError as exc:
         return error_response(exc)
 

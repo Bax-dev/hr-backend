@@ -17,6 +17,20 @@ jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     env:
       AWS_REGION: ${{ vars.AWS_REGION }}
       DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
@@ -30,10 +44,12 @@ jobs:
       - name: Django checks and tests
         env:
           DJANGO_DEBUG: 'true'
+          DJANGO_SECRET_KEY: ci-only-secret-key-that-is-long-enough-for-tests
           DB_NAME: postgres
           DB_USER: postgres
           DB_PASSWORD: postgres
-          DB_HOST: localhost
+          DB_HOST: 127.0.0.1
+          DB_PORT: '5432'
         run: |
           python manage.py check
           python manage.py test

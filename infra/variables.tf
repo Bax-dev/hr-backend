@@ -29,3 +29,11 @@ variable "production_deletion_protection" {
   type    = bool
   default = true
 }
+variable "domain_name" {
+  type    = string
+  default = "workiva.com.ng"
+}
+variable "cloudfront_certificate_arn" {
+  type    = string
+  default = "arn:aws:acm:us-east-1:172170847621:certificate/59f28f6d-c5e3-4a03-ac85-f93440d6ade7"
+}

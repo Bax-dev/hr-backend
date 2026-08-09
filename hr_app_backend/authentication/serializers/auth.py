@@ -62,6 +62,13 @@ def change_password_payload(payload):
     }
 
 
+def delete_account_payload(payload):
+    password = _value(payload, 'password')
+    if not password:
+        raise ValidationError('Password is required.')
+    return {'password': password}
+
+
 def forgot_password_payload(payload):
     email = _value(payload, 'email')
     if not email:

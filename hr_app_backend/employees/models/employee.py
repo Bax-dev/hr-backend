@@ -8,6 +8,19 @@ from .designation import Designation
 from .team import Team
 
 
+class EmployeeManager(models.Manager):
+    """Excludes soft-deleted employees from every default query.
+
+    Deletion is a soft delete (see Employee.delete_employee): the row is kept
+    for audit/records, so every existing `Employee.objects...` call site
+    across the app is filtered here rather than needing an `is_deleted`
+    check added at each call site.
+    """
+
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
+
+
 class Employee(TimeStampedModel):
     STATUS_ACTIVE = 'active'
     STATUS_ON_LEAVE = 'on_leave'
@@ -67,6 +80,14 @@ class Employee(TimeStampedModel):
     # monthly self-service edit limit from the staff portal.
     self_edits_used = models.PositiveIntegerField(default=0)
     self_edits_period = models.CharField(max_length=7, blank=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    objects = EmployeeManager()
+    # Unfiltered manager for cross-tenant admin views that need soft-deleted
+    # rows too (e.g. an "archived records" screen) — `objects` always excludes
+    # them, so `objects.filter(is_deleted=True)` would return nothing.
+    all_objects = models.Manager()
 
     class Meta:
         ordering = ['first_name', 'last_name']

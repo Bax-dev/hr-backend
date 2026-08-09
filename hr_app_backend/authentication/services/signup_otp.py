@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import random
 
 from django.contrib.auth import get_user_model
@@ -7,6 +8,7 @@ from hr_app_backend.third_parties import get_email_service, get_redis_client
 from hr_app_backend.services import render_email_template
 from hr_app_backend.utils.errors import NotFoundError, ValidationError
 
+from .otp_attempts import clear_attempts, register_failed_attempt
 from .validation import normalize_email
 
 User = get_user_model()
@@ -52,8 +54,10 @@ def resend_signup_otp(email):
     email = normalize_email(email)
     try:
         user = User.objects.select_related('profile').get(email=email)
-    except User.DoesNotExist as exc:
-        raise NotFoundError('No account was found for this email address.') from exc
+    except User.DoesNotExist:
+        # Same response shape as the success path so this endpoint can't be
+        # used to enumerate registered emails.
+        return {'email': email, 'expires_in': SIGNUP_OTP_EXPIRY_SECONDS}
 
     # A previous verification may have committed successfully while its HTTP
     # response failed. Sending a fresh code lets the owner recover that signup
@@ -63,9 +67,13 @@ def resend_signup_otp(email):
 
 def verify_signup_otp(email, otp):
     email = normalize_email(email)
-    stored = get_redis_client().get(_otp_key(email))
-    if not stored or stored != str(otp).strip():
+    key = _otp_key(email)
+    stored = get_redis_client().get(key)
+    if not stored or not hmac.compare_digest(stored, str(otp).strip()):
+        if stored:
+            register_failed_attempt(key)
         raise ValidationError('Invalid or expired OTP.')
+    clear_attempts(key)
 
     try:
         user = User.objects.select_related('profile').get(email=email)
@@ -77,5 +85,5 @@ def verify_signup_otp(email, otp):
         profile.email_verified = True
         profile.save(update_fields=['email_verified', 'updated_at'])
 
-    get_redis_client().delete(_otp_key(email))
+    get_redis_client().delete(key)
     return user

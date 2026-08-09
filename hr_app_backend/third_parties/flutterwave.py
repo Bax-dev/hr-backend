@@ -1,10 +1,12 @@
 import json
+import logging
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from hr_app_backend.utils import AppError, get_env
 
+logger = logging.getLogger(__name__)
 
 FLUTTERWAVE_BASE_URL = 'https://api.flutterwave.com/v3'
 
@@ -68,9 +70,11 @@ class FlutterwaveClient:
                 return json.loads(response.read().decode('utf-8'))
         except HTTPError as exc:
             details = exc.read().decode('utf-8', errors='ignore')
-            raise FlutterwaveError(f'Flutterwave request failed with status {exc.code}: {details}') from exc
+            logger.warning('Flutterwave request to %s failed with status %s: %s', path, exc.code, details)
+            raise FlutterwaveError('The payment provider could not process this request. Please try again.') from exc
         except URLError as exc:
-            raise FlutterwaveError(f'Unable to reach Flutterwave: {exc.reason}') from exc
+            logger.warning('Unable to reach Flutterwave for %s: %s', path, exc.reason)
+            raise FlutterwaveError('The payment provider is currently unreachable. Please try again.') from exc
 
 
 

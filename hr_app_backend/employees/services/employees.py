@@ -7,9 +7,11 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.authentication.services.employee_invites import create_employee_invite_token
+from hr_app_backend.authentication.services.sessions import destroy_all_sessions_for_user
 from hr_app_backend.services import render_email_template
 from hr_app_backend.third_parties import get_email_service
 from hr_app_backend.utils import get_env
@@ -25,7 +27,7 @@ from ..models import Designation, Employee, Team
 
 User = get_user_model()
 REQUIRED_FIELDS = ('first_name', 'last_name', 'email')
-DEFAULT_LOGIN_URL = 'http://localhost:5173/login'
+DEFAULT_LOGIN_URL = 'http://localhost:3000/login'
 
 
 def _require_organization(user):
@@ -516,6 +518,28 @@ def update_employee(user, employee_pk, data):
     return employee
 
 
+@transaction.atomic
 def delete_employee(user, employee_pk):
+    """Soft-delete an employee and revoke any portal access they had.
+
+    The Employee row is kept (mangled email/employee_id so the slot frees up
+    for a future hire) rather than hard-deleted, so HR/audit history survives.
+    Deleting is the only staff-removal path that revokes access; archiving
+    (status=terminated) intentionally leaves login access untouched.
+    """
     employee = get_employee(user, employee_pk)
-    employee.delete()
+
+    profile = getattr(employee, 'user_profile', None)
+    if profile is not None:
+        account_user = profile.user
+        account_user.is_active = False
+        account_user.save(update_fields=['is_active'])
+        profile.organization = None
+        profile.save(update_fields=['organization', 'updated_at'])
+        destroy_all_sessions_for_user(account_user.id)
+
+    employee.is_deleted = True
+    employee.deleted_at = timezone.now()
+    employee.email = f'deleted-{employee.pk}-{employee.email}'[:254]
+    employee.employee_id = f'DEL-{employee.pk}'[:32]
+    employee.save(update_fields=['is_deleted', 'deleted_at', 'email', 'employee_id', 'updated_at'])

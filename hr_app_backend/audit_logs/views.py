@@ -8,17 +8,7 @@ from hr_app_backend.utils.errors import AppError, AuthenticationError, Permissio
 from hr_app_backend.utils.pagination import paginate_queryset
 
 from .models import AuditLog
-
-
-def _serialize(log):
-    return {
-        'id': str(log.id), 'action': log.action, 'category': log.category,
-        'description': log.description, 'status': log.status,
-        'actor': {'id': str(log.actor_id) if log.actor_id else None, 'name': log.actor_name, 'email': log.actor_email},
-        'resource': {'type': log.resource_type, 'id': log.resource_id},
-        'ipAddress': log.ip_address, 'userAgent': log.user_agent, 'requestId': log.request_id,
-        'metadata': log.metadata, 'createdAt': log.created_at.isoformat(),
-    }
+from .serializers import serialize_audit_log
 
 
 @require_GET
@@ -53,7 +43,7 @@ def audit_log_list_view(request):
         categories = list(AuditLog.objects.filter(organization_id=profile.organization_id)
                           .values_list('category', flat=True).distinct().order_by('category'))
         return JsonResponse({'success': True, 'data': {
-            'logs': [_serialize(log) for log in items], 'pagination': pagination, 'categories': categories,
+            'logs': [serialize_audit_log(log) for log in items], 'pagination': pagination, 'categories': categories,
         }})
     except AppError as exc:
         return error_response(exc)

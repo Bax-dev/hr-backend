@@ -58,10 +58,18 @@ DASHBOARD_DISTRIBUTION_COLORS = ['#2563EB', '#10B981', '#F59E0B', '#8B5CF6', '#E
 
 def _organization_for(request):
     user = require_user(request)
+    # A Django superuser is a platform administrator, not a tenant member.
+    # ``None`` deliberately means "all organizations" to dashboard helpers.
+    if user.is_superuser:
+        return user, None
     organization = getattr(getattr(user, 'profile', None), 'organization', None)
     if organization is None:
         raise ValidationError('Your account is not linked to an organization.')
     return user, organization
+
+
+def _in_organization(queryset, organization):
+    return queryset if organization is None else queryset.filter(organization=organization)
 
 
 def _is_individual_account(user):
@@ -309,8 +317,7 @@ def _birthday_events(employees, today, limit=2):
 
 def _leave_event_candidates(organization, today, limit=2):
     return list(
-        LeaveRequest.objects.filter(
-            organization=organization,
+        _in_organization(LeaveRequest.objects.all(), organization).filter(
             status=LeaveRequest.STATUS_APPROVED,
             start_date__gte=today,
             start_date__lte=today + timedelta(days=14),
@@ -360,29 +367,24 @@ def _dashboard_overview_payload(user, organization):
     month_start = _month_start(current_month)
     month_end = _month_end(current_month)
 
-    active_employees = list(
-        Employee.objects.filter(organization=organization).exclude(status=Employee.STATUS_TERMINATED)
-    )
+    active_employees = list(_in_organization(Employee.objects.all(), organization).exclude(status=Employee.STATUS_TERMINATED))
     employees_by_id = {employee.id: employee for employee in active_employees}
     employee_count = len(active_employees)
 
     attendance_today = list(
-        AttendanceRecord.objects.filter(
-            organization=organization,
+        _in_organization(AttendanceRecord.objects.all(), organization).filter(
             date=today,
             employee_id__in=employees_by_id.keys(),
         ).select_related('employee')
     )
     weekly_attendance = list(
-        AttendanceRecord.objects.filter(
-            organization=organization,
+        _in_organization(AttendanceRecord.objects.all(), organization).filter(
             date__range=(week_start, week_end),
             employee_id__in=employees_by_id.keys(),
         )
     )
     current_leaves = list(
-        LeaveRequest.objects.filter(
-            organization=organization,
+        _in_organization(LeaveRequest.objects.all(), organization).filter(
             status=LeaveRequest.STATUS_APPROVED,
             start_date__lte=today,
             end_date__gte=today,
@@ -390,16 +392,14 @@ def _dashboard_overview_payload(user, organization):
         ).select_related('employee')
     )
     monthly_leaves = list(
-        LeaveRequest.objects.filter(
-            organization=organization,
+        _in_organization(LeaveRequest.objects.all(), organization).filter(
             status=LeaveRequest.STATUS_APPROVED,
             start_date__lte=month_end,
             end_date__gte=month_start,
             employee_id__in=employees_by_id.keys(),
         ).select_related('employee')
     )
-    pending_leave_count = LeaveRequest.objects.filter(
-        organization=organization,
+    pending_leave_count = _in_organization(LeaveRequest.objects.all(), organization).filter(
         status=LeaveRequest.STATUS_PENDING,
         employee_id__in=employees_by_id.keys(),
     ).count()
@@ -431,8 +431,7 @@ def _dashboard_overview_payload(user, organization):
     )
 
     active_ids = {employee.id for employee in active_employees}
-    previous_month_total = Employee.objects.filter(
-        organization=organization,
+    previous_month_total = _in_organization(Employee.objects.all(), organization).filter(
         created_at__lt=month_start,
     ).exclude(status=Employee.STATUS_TERMINATED).count()
     total_direction, total_note = _month_delta_label(employee_count, previous_month_total)
@@ -502,9 +501,9 @@ def _dashboard_overview_payload(user, organization):
     ]
 
     current_payroll_records = list(
-        PayrollRecord.objects.filter(organization=organization, month=current_month).select_related('employee')
+        _in_organization(PayrollRecord.objects.all(), organization).filter(month=current_month).select_related('employee')
     )
-    previous_payroll_records = list(PayrollRecord.objects.filter(organization=organization, month=previous_month))
+    previous_payroll_records = list(_in_organization(PayrollRecord.objects.all(), organization).filter(month=previous_month))
     payroll_snapshot = _dashboard_payroll_snapshot(active_employees, current_payroll_records)
     previous_total_payroll = sum(record.net_pay for record in previous_payroll_records)
     payroll_direction, payroll_note = _month_delta_label(
@@ -548,16 +547,6 @@ def _dashboard_overview_payload(user, organization):
             'dayLabel': leave.start_date.strftime('%d'),
             'color': '#10B981',
         })
-    if len(upcoming_events) < 3:
-        payroll_processing_date = min(month_end, today + timedelta(days=10))
-        upcoming_events.append({
-            'id': f'payroll-{current_month}',
-            'title': 'Payroll Processing',
-            'startsAt': datetime.combine(payroll_processing_date, time(hour=14, minute=0), tzinfo=timezone.get_current_timezone()).isoformat(),
-            'monthLabel': payroll_processing_date.strftime('%b').upper(),
-            'dayLabel': payroll_processing_date.strftime('%d'),
-            'color': '#8B5CF6',
-        })
     upcoming_events = sorted(upcoming_events, key=lambda item: item['startsAt'])[:3]
 
     total_colors = DASHBOARD_STAT_COLORS['totalEmployees']
@@ -569,7 +558,11 @@ def _dashboard_overview_payload(user, organization):
     return {
         'header': {
             'title': 'Dashboard',
-            'subtitle': f"Welcome back, {_display_name(user)}! Here's what's happening in your organization.",
+            'subtitle': (
+                f"Welcome back, {_display_name(user)}! Here's what's happening across the platform."
+                if organization is None
+                else f"Welcome back, {_display_name(user)}! Here's what's happening in your organization."
+            ),
             'dateRange': {
                 'startDate': week_start.isoformat(),
                 'endDate': week_end.isoformat(),

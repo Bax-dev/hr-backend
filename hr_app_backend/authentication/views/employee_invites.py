@@ -6,7 +6,7 @@ from hr_app_backend.utils.errors import AppError
 from hr_app_backend.utils.throttles import throttle_view
 
 from ..services import accept_employee_invite, auth_response, employee_invite_details
-from .helpers import error_response, load_json
+from .helpers import error_response, load_json, session_json_response
 
 
 @require_GET
@@ -24,6 +24,6 @@ def employee_invite_view(request):
 def accept_employee_invite_view(request):
     try:
         user = accept_employee_invite(load_json(request))
-        return JsonResponse({'success': True, 'data': auth_response(user)})
+        return session_json_response(auth_response(user))
     except AppError as exc:
         return error_response(exc)

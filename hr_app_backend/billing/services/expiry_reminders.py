@@ -6,7 +6,7 @@ from hr_app_backend.utils import get_env, timedelta, today_local
 
 from ..models import Subscription
 
-DEFAULT_BILLING_URL = 'http://localhost:5173/billing/start'
+DEFAULT_BILLING_URL = 'http://localhost:3000/billing/start'
 
 # (days remaining, field that records when that window's reminder was sent)
 REMINDER_WINDOWS = (

@@ -1,0 +1,25 @@
+{% extends "emails/base_template.html" %}
+
+{% block email_content %}
+  <p style="margin:0 0 26px;font-size:17px;line-height:1.6;color:#5b5c54;">
+    The <strong style="color:#0f172a;">{{ organization_name }}</strong> workspace has been
+    <strong style="color:#0f172a;">{{ status_label }}</strong>.
+  </p>
+
+  {% if reason %}
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="margin:0 0 26px;">
+      <tr>
+        <td style="border:1px solid #cbd2da;border-radius:8px;padding:16px 18px;">
+          <div style="margin:0 0 6px;font-size:12px;font-weight:700;line-height:1;letter-spacing:0.12em;text-transform:uppercase;color:#0529e0;">
+            Reason
+          </div>
+          <p style="margin:0;font-size:15px;line-height:1.6;color:#071425;">{{ reason }}</p>
+        </td>
+      </tr>
+    </table>
+  {% endif %}
+
+  <p style="margin:0;font-size:16px;line-height:1.65;color:#5b5c54;">
+    {{ status_message }}
+  </p>
+{% endblock %}

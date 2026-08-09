@@ -19,6 +19,7 @@ LOCAL_APPS = [
     'hr_app_backend.employees',
     'hr_app_backend.leave',
     'hr_app_backend.platform',
+    'hr_app_backend.superadmin',
     'hr_app_backend.talent',
     'hr_app_backend.workspace_settings',
 ]

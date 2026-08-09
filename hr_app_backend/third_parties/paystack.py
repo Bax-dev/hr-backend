@@ -1,10 +1,12 @@
 import json
+import logging
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from hr_app_backend.utils import AppError, get_env
 
+logger = logging.getLogger(__name__)
 
 PAYSTACK_BASE_URL = "https://api.paystack.co"
 PAYSTACK_USER_AGENT = "hr-app-backend/1.0 (+https://workiva.com.ng)"
@@ -83,9 +85,11 @@ class PaystackClient:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             details = exc.read().decode("utf-8", errors="ignore")
-            raise PaystackError(f"Paystack request failed with status {exc.code}: {details}") from exc
+            logger.warning("Paystack request to %s failed with status %s: %s", path, exc.code, details)
+            raise PaystackError("The payment provider could not process this request. Please try again.") from exc
         except URLError as exc:
-            raise PaystackError(f"Unable to reach Paystack: {exc.reason}") from exc
+            logger.warning("Unable to reach Paystack for %s: %s", path, exc.reason)
+            raise PaystackError("The payment provider is currently unreachable. Please try again.") from exc
 
 
 def get_paystack_client():

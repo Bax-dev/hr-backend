@@ -4,6 +4,7 @@ from django.core.cache import cache
 from django.http import JsonResponse
 
 from .errors import AppError, error_payload
+from .request_ip import client_ip
 
 _PERIODS = {
     'sec': 1,
@@ -41,10 +42,7 @@ def client_identifier(request):
     if user_id and getattr(user, 'is_authenticated', False):
         return f'user:{user_id}'
 
-    forwarded = request.META.get('HTTP_X_FORWARDED_FOR', '')
-    if forwarded:
-        return f'ip:{forwarded.split(",")[0].strip()}'
-    return f'ip:{request.META.get("REMOTE_ADDR", "unknown")}'
+    return f'ip:{client_ip(request)}'
 
 
 def throttle(request, *, scope, rate, ident=None):

@@ -79,10 +79,18 @@ Apply the database migrations:
 python manage.py migrate
 ```
 
-Optionally create an administrator account:
+Optionally create an administrator account interactively:
 
 ```bash
 python manage.py createsuperuser
+```
+
+Or bootstrap one non-interactively from `SUPERADMIN_EMAIL` / `SUPERADMIN_PASSWORD` in
+`.env` — safe to run repeatedly (a no-op once the account exists, unless
+`--reset-password` is passed):
+
+```bash
+python manage.py create_superadmin
 ```
 
 Start the development server:

@@ -21,9 +21,17 @@ def _session_key(token):
     return f'{SESSION_NAMESPACE}:{token}'
 
 
+def _user_sessions_key(user_id):
+    return f'{SESSION_NAMESPACE}:user:{user_id}'
+
+
 def create_session(user):
     token = secrets.token_urlsafe(32)
-    get_redis_client().setex(_session_key(token), SESSION_EXPIRY_SECONDS, _build_session_payload(user))
+    client = get_redis_client()
+    client.setex(_session_key(token), SESSION_EXPIRY_SECONDS, _build_session_payload(user))
+    user_sessions_key = _user_sessions_key(user.id)
+    client.sadd(user_sessions_key, token)
+    client.expire(user_sessions_key, SESSION_EXPIRY_SECONDS)
     return token
 
 
@@ -35,14 +43,34 @@ def get_user_by_token(token):
         return None
     data = json.loads(payload)
     try:
-        return User.objects.select_related('profile__organization').get(id=data['user_id'])
+        user = User.objects.select_related('profile__organization').get(id=data['user_id'])
     except User.DoesNotExist:
         return None
+    # Belt-and-suspenders: a deactivated account (e.g. deleted staff/self-deleted
+    # user) should fail auth immediately even if a stray session token survives.
+    if not user.is_active:
+        return None
+    return user
 
 
 def destroy_session(token):
-    if token:
-        get_redis_client().delete(_session_key(token))
+    if not token:
+        return
+    client = get_redis_client()
+    payload = client.get(_session_key(token))
+    client.delete(_session_key(token))
+    if payload:
+        data = json.loads(payload)
+        client.srem(_user_sessions_key(data['user_id']), token)
+
+
+def destroy_all_sessions_for_user(user_id):
+    client = get_redis_client()
+    user_sessions_key = _user_sessions_key(user_id)
+    tokens = client.smembers(user_sessions_key)
+    if tokens:
+        client.delete(*(_session_key(token) for token in tokens))
+    client.delete(user_sessions_key)
 
 
 def auth_response(user):

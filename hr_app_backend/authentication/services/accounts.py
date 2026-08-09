@@ -3,7 +3,8 @@ from django.contrib.auth.hashers import check_password, make_password
 from django.db import transaction
 
 from ..models import Organization, UserProfile
-from hr_app_backend.utils.errors import AuthenticationError, ConflictError, ValidationError
+from hr_app_backend.utils.errors import AuthenticationError, ConflictError, PermissionDeniedError, ValidationError
+from .sessions import destroy_all_sessions_for_user
 from .signup_otp import send_signup_otp
 from .validation import normalize_email, validate_email_address, validate_passwords
 
@@ -103,6 +104,14 @@ def login_user(data):
     user = authenticate(username=email, password=password)
     if user is None:
         raise AuthenticationError('Invalid email or password.')
+
+    profile = getattr(user, 'profile', None)
+    organization = getattr(profile, 'organization', None) if profile else None
+    if organization is not None and organization.status == Organization.STATUS_SUSPENDED:
+        message = f'Your company account has been suspended. Reason: {organization.suspended_reason}' \
+            if organization.suspended_reason else 'Your company account has been suspended.'
+        raise PermissionDeniedError(message)
+
     return user
 
 
@@ -124,4 +133,37 @@ def change_password(user, data):
         profile.must_change_password = False
         profile.save(update_fields=['must_change_password'])
 
+    return user
+
+
+@transaction.atomic
+def delete_account(user, data):
+    """Soft-delete the signed-in user's own account: deactivate the login,
+    detach it from its organization, and kill every active session.
+
+    Company (org admin) accounts can't self-delete since there's no owner
+    transfer flow yet; that would orphan the organization and its employees.
+    The linked Employee HR record (if any) is left untouched — it belongs to
+    the org, not to the user deleting their own account access.
+    """
+    password = data.get('password') or ''
+    if not check_password(password, user.password):
+        raise AuthenticationError('Incorrect password.')
+
+    profile = getattr(user, 'profile', None)
+    if profile and profile.account_type == UserProfile.ACCOUNT_TYPE_COMPANY:
+        raise PermissionDeniedError(
+            'Company accounts cannot delete themselves. Contact support to close your organization.'
+        )
+
+    user.is_active = False
+    user.email = f'deleted-{user.id}-{user.email}'[:254]
+    user.username = f'deleted-{user.id}-{user.username}'[:150]
+    user.save(update_fields=['is_active', 'email', 'username'])
+
+    if profile is not None:
+        profile.organization = None
+        profile.save(update_fields=['organization', 'updated_at'])
+
+    destroy_all_sessions_for_user(user.id)
     return user

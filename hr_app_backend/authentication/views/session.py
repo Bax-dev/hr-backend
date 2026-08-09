@@ -8,9 +8,9 @@ from hr_app_backend.utils.throttles import throttle, throttle_view
 from hr_app_backend.audit_logs.services import record_audit_event_safely
 
 from ..serializers import serialize_user
-from ..serializers import change_password_payload, login_payload
-from ..services import auth_response, change_password, destroy_session, get_user_by_token, login_user
-from .helpers import error_response, load_json, token_from_request
+from ..serializers import change_password_payload, delete_account_payload, login_payload
+from ..services import auth_response, change_password, delete_account, destroy_session, get_user_by_token, login_user
+from .helpers import clear_session_cookie, error_response, load_json, session_json_response, token_from_request
 
 
 @csrf_exempt
@@ -23,13 +23,14 @@ def login_view(request):
         # many IPs, so also cap attempts against a single account.
         throttle(request, scope='auth:login:account', rate='10/min', ident=payload['email'].lower())
         user = login_user(payload)
-        organization = getattr(user.profile, 'organization', None)
+        profile = getattr(user, 'profile', None)
+        organization = getattr(profile, 'organization', None)
         if organization:
             record_audit_event_safely(
                 organization=organization, actor=user, request=request, action='auth.login',
                 category='authentication', description=f'{user.email} signed in.', resource_type='user', resource_id=user.id,
             )
-        return JsonResponse({'success': True, 'data': auth_response(user)})
+        return session_json_response(auth_response(user))
     except AppError as exc:
         return error_response(exc)
 
@@ -81,13 +82,42 @@ def me_view(request):
 def logout_view(request):
     token = token_from_request(request)
     user = get_user_by_token(token)
-    if user is not None and user.profile.organization_id:
+    profile = getattr(user, 'profile', None) if user is not None else None
+    if profile is not None and profile.organization_id:
         record_audit_event_safely(
-            organization=user.profile.organization, actor=user, request=request, action='auth.logout',
+            organization=profile.organization, actor=user, request=request, action='auth.logout',
             category='authentication', description=f'{user.email} signed out.', resource_type='user', resource_id=user.id,
         )
     destroy_session(token)
-    return JsonResponse({'success': True, 'message': 'Logged out successfully.'})
+    response = JsonResponse({'success': True, 'message': 'Logged out successfully.'})
+    clear_session_cookie(response)
+    return response
+
+
+@csrf_exempt
+@require_http_methods(['DELETE'])
+@throttle_view('auth:delete-account', '5/min')
+def delete_account_view(request):
+    try:
+        token = token_from_request(request)
+        user = get_user_by_token(token)
+        if user is None:
+            raise AuthenticationError('Authentication credentials were not provided or are invalid.')
+        profile = getattr(user, 'profile', None)
+        organization = getattr(profile, 'organization', None)
+        original_email = user.email
+        deleted_user = delete_account(user, delete_account_payload(load_json(request)))
+        if organization:
+            record_audit_event_safely(
+                organization=organization, actor=deleted_user, request=request, action='auth.account_deleted',
+                category='security', description=f'{original_email} deleted their account.',
+                resource_type='user', resource_id=deleted_user.id,
+            )
+        response = JsonResponse({'success': True, 'message': 'Account deleted successfully.'})
+        clear_session_cookie(response)
+        return response
+    except AppError as exc:
+        return error_response(exc)
 
 
 @csrf_exempt
@@ -100,9 +130,10 @@ def change_password_view(request):
         if user is None:
             raise AuthenticationError('Authentication credentials were not provided or are invalid.')
         updated_user = change_password(user, change_password_payload(load_json(request)))
-        if updated_user.profile.organization_id:
+        updated_profile = getattr(updated_user, 'profile', None)
+        if updated_profile is not None and updated_profile.organization_id:
             record_audit_event_safely(
-                organization=updated_user.profile.organization, actor=updated_user, request=request,
+                organization=updated_profile.organization, actor=updated_user, request=request,
                 action='auth.password_changed', category='security',
                 description=f'{updated_user.email} changed their password.', resource_type='user', resource_id=updated_user.id,
             )

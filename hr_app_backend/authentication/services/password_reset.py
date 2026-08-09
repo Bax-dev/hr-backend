@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import random
 
 from django.contrib.auth import get_user_model
@@ -9,6 +10,7 @@ from hr_app_backend.third_parties import get_email_service, get_redis_client
 from hr_app_backend.services import render_email_template
 from hr_app_backend.utils.errors import NotFoundError, ValidationError
 
+from .otp_attempts import clear_attempts, register_failed_attempt
 from .validation import normalize_email, validate_email_address, validate_passwords
 
 User = get_user_model()
@@ -30,10 +32,13 @@ def send_password_reset_otp(email):
     email = normalize_email(email)
     validate_email_address(email)
 
+    # Always return the same shape whether or not the account exists, so
+    # this endpoint can't be used to enumerate registered emails. The OTP is
+    # only generated and mailed when there's a real account behind it.
     try:
         user = User.objects.get(email=email)
-    except User.DoesNotExist as exc:
-        raise NotFoundError('No account was found for this email address.') from exc
+    except User.DoesNotExist:
+        return {'email': email, 'expires_in': OTP_EXPIRY_SECONDS}
 
     otp_code = f'{random.randint(0, 999999):06d}'
     get_redis_client().setex(_otp_key(email), OTP_EXPIRY_SECONDS, otp_code)
@@ -60,9 +65,13 @@ def send_password_reset_otp(email):
 
 def verify_password_reset_otp(email, otp):
     email = normalize_email(email)
-    stored = get_redis_client().get(_otp_key(email))
-    if not stored or stored != str(otp).strip():
+    key = _otp_key(email)
+    stored = get_redis_client().get(key)
+    if not stored or not hmac.compare_digest(stored, str(otp).strip()):
+        if stored:
+            register_failed_attempt(key)
         raise ValidationError('Invalid or expired OTP.')
+    clear_attempts(key)
     return {'email': email, 'verified': True}
 
 

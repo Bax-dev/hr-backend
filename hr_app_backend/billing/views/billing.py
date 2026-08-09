@@ -13,6 +13,8 @@ from ..services import (
     verify_paid_signup_checkout,
     verify_subscription_payment,
 )
+from hr_app_backend.authentication.views.helpers import set_session_cookie
+
 from .helpers import error_response, load_json, require_authenticated_user
 
 
@@ -87,7 +89,9 @@ def verify_paid_signup_checkout_view(request):
             from hr_app_backend.utils.errors import ValidationError
             raise ValidationError('Reference is required.')
         subscription, session, provider_response = verify_paid_signup_checkout(reference)
-        return JsonResponse({
+        session = dict(session)
+        token = session.pop('token', None)
+        response = JsonResponse({
             'success': True,
             'data': {
                 'subscription': serialize_subscription(subscription),
@@ -96,5 +100,8 @@ def verify_paid_signup_checkout_view(request):
                 'provider_response': provider_response,
             },
         })
+        if token:
+            set_session_cookie(response, token)
+        return response
     except AppError as exc:
         return error_response(exc)

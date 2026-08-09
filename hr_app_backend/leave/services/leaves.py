@@ -1,8 +1,11 @@
 import datetime
+import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 
+from hr_app_backend.services import render_email_template
+from hr_app_backend.third_parties import get_email_service
 from hr_app_backend.utils import local_now
 from hr_app_backend.utils.errors import NotFoundError, PermissionDeniedError, ValidationError
 
@@ -10,6 +13,8 @@ from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.employees.models import Employee
 
 from ..models import LeaveRequest
+
+logger = logging.getLogger(__name__)
 
 REQUIRED_FIELDS = ('employee_id', 'leave_type', 'start_date', 'end_date', 'reason')
 
@@ -63,6 +68,39 @@ def _calculate_days(start_date, end_date):
     if end_date < start_date:
         raise ValidationError('End date cannot be earlier than start date.')
     return (end_date - start_date).days + 1
+
+
+def _send_leave_decision_email(leave):
+    recipient = leave.employee.email
+    if not recipient:
+        return
+    status_label = leave.get_status_display().lower()
+    try:
+        get_email_service().send_mail(
+            subject=f'Your leave request has been {status_label}',
+            body=(
+                f'Your {leave.get_leave_type_display()} leave from {leave.start_date} '
+                f'to {leave.end_date} was {status_label}.'
+                + (f' Reason: {leave.rejection_reason}' if leave.rejection_reason else '')
+            ),
+            html_body=render_email_template(
+                'emails/leave_decision.html',
+                {
+                    'email_title': f'Leave request {status_label}',
+                    'email_eyebrow': 'Leave Management',
+                    'email_heading': f'Your leave request has been {status_label}',
+                    'leave_type': leave.get_leave_type_display(),
+                    'status_label': status_label,
+                    'start_date': leave.start_date,
+                    'end_date': leave.end_date,
+                    'days': leave.days,
+                    'rejection_reason': leave.rejection_reason,
+                },
+            ),
+            to_emails=[recipient],
+        )
+    except Exception:
+        logger.exception('Failed to send leave decision email for leave=%s', leave.id)
 
 
 def _get_employee(organization, employee_pk):
@@ -208,6 +246,7 @@ def update_leave(user, leave_pk, data):
             ),
             category='Leave',
         )
+        _send_leave_decision_email(leave)
 
     return leave
 
