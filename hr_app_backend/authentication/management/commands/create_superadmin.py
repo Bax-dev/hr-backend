@@ -48,11 +48,7 @@ class Command(BaseCommand):
             return
 
         changed = False
-        # The default Django authentication backend looks users up by
-        # ``username``.  This application presents an email-only login form,
-        # so an existing account whose username predates that convention must
-        # be brought back into sync or its valid email/password pair cannot
-        # authenticate.
+        
         if user.username != email:
             if User.objects.filter(username__iexact=email).exclude(pk=user.pk).exists():
                 raise CommandError(
