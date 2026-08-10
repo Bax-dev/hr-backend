@@ -40,9 +40,10 @@ TRUSTED_PROXY_HOPS = get_int("DJANGO_TRUSTED_PROXY_HOPS", default=2)
 # and SECURE_SSL_REDIRECT would loop.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
-# Only enforce HTTPS/HSTS and mark cookies Secure outside local dev, where
-# the app is served over plain http://127.0.0.1.
-SECURE_SSL_REDIRECT = not DEBUG
+# CloudFront already redirects viewers to HTTPS. Deployments where CloudFront
+# connects to an HTTP-only ALB must disable Django's redirect to avoid a loop:
+# the ALB correctly reports its own hop as HTTP even when the viewer used HTTPS.
+SECURE_SSL_REDIRECT = get_bool("DJANGO_SECURE_SSL_REDIRECT", default=not DEBUG)
 SESSION_COOKIE_SECURE = not DEBUG
 CSRF_COOKIE_SECURE = not DEBUG
 SESSION_COOKIE_HTTPONLY = True

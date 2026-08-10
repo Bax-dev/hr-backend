@@ -580,6 +580,8 @@ resource "aws_ecs_task_definition" "backend" {
         ))
         }, {
         name = "DJANGO_DEBUG", value = "false"
+        }, {
+        name = "DJANGO_SECURE_SSL_REDIRECT", value = "false"
       },
       {
         name = "DB_NAME", value = aws_db_instance.this[each.key].db_name
