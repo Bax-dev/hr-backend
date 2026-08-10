@@ -569,7 +569,15 @@ resource "aws_ecs_task_definition" "backend" {
     }],
     environment = [
       {
-        name = "DJANGO_ALLOWED_HOSTS", value = "${aws_lb.this[each.key].dns_name},${aws_cloudfront_distribution.frontend[each.key].domain_name}"
+        name = "DJANGO_ALLOWED_HOSTS", value = join(",", concat(
+          [aws_lb.this[each.key].dns_name, aws_cloudfront_distribution.frontend[each.key].domain_name],
+          each.key == "prod" ? [var.domain_name, "www.${var.domain_name}"] : ["staging.${var.domain_name}"]
+        ))
+        }, {
+        name = "DJANGO_CSRF_TRUSTED_ORIGINS", value = join(",", concat(
+          ["https://${aws_cloudfront_distribution.frontend[each.key].domain_name}"],
+          each.key == "prod" ? ["https://${var.domain_name}", "https://www.${var.domain_name}"] : ["https://staging.${var.domain_name}"]
+        ))
         }, {
         name = "DJANGO_DEBUG", value = "false"
       },
@@ -636,9 +644,6 @@ resource "aws_ecs_service" "backend" {
     container_port   = 8000
   }
   depends_on = [aws_lb_listener.http]
-  lifecycle {
-    ignore_changes = [task_definition]
-  }
 }
 
 resource "aws_iam_role" "scheduler" {
