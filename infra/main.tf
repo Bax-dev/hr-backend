@@ -614,6 +614,8 @@ resource "aws_ecs_task_definition" "backend" {
         name = "BEDROCK_MODEL_ID", value = "us.amazon.nova-pro-v1:0"
         }, {
         name = "EMAIL_LOGO_URL", value = "https://${each.key == "prod" ? var.domain_name : "staging.${var.domain_name}"}/transparent-logo-mark.png"
+        }, {
+        name = "DJANGO_DEFAULT_FROM_EMAIL", value = "Workiva <noreply@workiva.com.ng>"
       }
     ],
     secrets = [{
