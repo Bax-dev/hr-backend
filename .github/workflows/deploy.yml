@@ -2,7 +2,7 @@ name: Deploy backend
 
 on:
   push:
-    branches: [main, staging]
+    branches: [production, staging]
   workflow_dispatch:
 
 permissions:
@@ -16,7 +16,7 @@ concurrency:
 jobs:
   test-and-deploy:
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+    environment: ${{ github.ref_name == 'production' && 'prod' || 'staging' }}
     services:
       postgres:
         image: postgres:16
@@ -33,7 +33,7 @@ jobs:
           --health-retries 5
     env:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-      DEPLOY_ENV: ${{ github.ref_name == 'main' && 'prod' || 'staging' }}
+      DEPLOY_ENV: ${{ github.ref_name == 'production' && 'prod' || 'staging' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
