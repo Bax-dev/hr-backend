@@ -5,6 +5,9 @@ data "aws_caller_identity" "current" {}
 data "aws_secretsmanager_secret" "resend_api_key" {
   name = "workiva/resend-api-key"
 }
+data "aws_secretsmanager_secret" "paystack_secret_key" {
+  name = "workiva/paystack-secret-key"
+}
 
 locals {
   environments = toset(["staging", "prod"])
@@ -488,7 +491,10 @@ resource "aws_iam_role_policy" "ecs_execution_secrets" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["secretsmanager:GetSecretValue"]
-      Resource = data.aws_secretsmanager_secret.resend_api_key.arn
+      Resource = [
+        data.aws_secretsmanager_secret.resend_api_key.arn,
+        data.aws_secretsmanager_secret.paystack_secret_key.arn,
+      ]
     }]
   })
 }
@@ -621,6 +627,9 @@ resource "aws_ecs_task_definition" "backend" {
     secrets = [{
       name      = "RESEND_API_KEY"
       valueFrom = data.aws_secretsmanager_secret.resend_api_key.arn
+      }, {
+      name      = "PAYSTACK_SECRET_KEY"
+      valueFrom = data.aws_secretsmanager_secret.paystack_secret_key.arn
     }],
     logConfiguration = {
       logDriver = "awslogs", options = {
