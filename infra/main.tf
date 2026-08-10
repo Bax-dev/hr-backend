@@ -729,7 +729,10 @@ resource "aws_iam_role_policy" "github" {
         Effect = "Allow", Action = ["ecr:BatchCheckLayerAvailability", "ecr:GetDownloadUrlForLayer", "ecr:BatchGetImage", "ecr:PutImage", "ecr:InitiateLayerUpload", "ecr:UploadLayerPart", "ecr:CompleteLayerUpload"], Resource = aws_ecr_repository.backend.arn
       },
       {
-        Effect = "Allow", Action = ["ecs:DescribeServices", "ecs:UpdateService"], Resource = "*"
+        Effect = "Allow", Action = ["ecs:DescribeServices", "ecs:UpdateService", "ecs:RunTask", "ecs:DescribeTasks"], Resource = "*"
+      },
+      {
+        Effect = "Allow", Action = ["iam:PassRole"], Resource = [aws_iam_role.ecs_execution.arn, aws_iam_role.ecs_task.arn]
       },
       {
         Effect = "Allow", Action = ["s3:ListBucket", "s3:PutObject", "s3:DeleteObject", "s3:GetObject"], Resource = concat([for b in aws_s3_bucket.frontend : b.arn], [for b in aws_s3_bucket.frontend : "${b.arn}/*"])

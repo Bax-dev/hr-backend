@@ -66,6 +66,36 @@ jobs:
           docker build -t "$REGISTRY/workiva-backend:$DEPLOY_ENV" -t "$REGISTRY/workiva-backend:${GITHUB_SHA}" .
           docker push "$REGISTRY/workiva-backend:$DEPLOY_ENV"
           docker push "$REGISTRY/workiva-backend:${GITHUB_SHA}"
+      - name: Run database migrations
+        run: |
+          set -euo pipefail
+
+          NETWORK_CONFIG=$(aws ecs describe-services \
+            --cluster "workiva-$DEPLOY_ENV" \
+            --services backend \
+            --query 'services[0].networkConfiguration' \
+            --output json)
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster "workiva-$DEPLOY_ENV" \
+            --task-definition "workiva-$DEPLOY_ENV-backend" \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --overrides '{"containerOverrides":[{"name":"backend","command":["python","manage.py","migrate","--noinput"]}]}' \
+            --query 'tasks[0].taskArn' --output text)
+
+          echo "Migration task: $TASK_ARN"
+          aws ecs wait tasks-stopped --cluster "workiva-$DEPLOY_ENV" --tasks "$TASK_ARN"
+
+          EXIT_CODE=$(aws ecs describe-tasks --cluster "workiva-$DEPLOY_ENV" --tasks "$TASK_ARN" \
+            --query 'tasks[0].containers[0].exitCode' --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            STOPPED_REASON=$(aws ecs describe-tasks --cluster "workiva-$DEPLOY_ENV" --tasks "$TASK_ARN" \
+              --query 'tasks[0].stoppedReason' --output text)
+            echo "Migration task failed (exit code $EXIT_CODE): $STOPPED_REASON"
+            exit 1
+          fi
       - name: Roll ECS service
         run: aws ecs update-service --cluster "workiva-$DEPLOY_ENV" --service backend --force-new-deployment
       - name: Wait for stability
