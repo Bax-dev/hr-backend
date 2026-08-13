@@ -530,6 +530,31 @@ resource "aws_iam_role_policy" "ecs_task" {
   })
 }
 
+resource "aws_iam_user" "local_dev_uploads" {
+  name = "${var.project}-local-dev-uploads"
+}
+resource "aws_iam_user_policy" "local_dev_uploads" {
+  name = "${var.project}-local-dev-uploads-s3"
+  user = aws_iam_user.local_dev_uploads.name
+  policy = jsonencode({
+    Version = "2012-10-17", Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"]
+        Resource = [for b in aws_s3_bucket.app : "${b.arn}/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = "s3:ListBucket"
+        Resource = [for b in aws_s3_bucket.app : b.arn]
+      }
+    ]
+  })
+}
+resource "aws_iam_access_key" "local_dev_uploads" {
+  user = aws_iam_user.local_dev_uploads.name
+}
+
 resource "aws_lb" "this" {
   for_each           = local.environments
   name               = "${var.project}-${each.key}"

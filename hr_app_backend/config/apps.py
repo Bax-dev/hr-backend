@@ -18,6 +18,7 @@ LOCAL_APPS = [
     'hr_app_backend.billing',
     'hr_app_backend.departments',
     'hr_app_backend.employees',
+    'hr_app_backend.file_management',
     'hr_app_backend.leave',
     'hr_app_backend.platform',
     'hr_app_backend.superadmin',

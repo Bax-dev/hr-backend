@@ -29,3 +29,10 @@ output "mail_queue_urls" {
     for env, q in aws_sqs_queue.mail : env => q.url
   }
 }
+output "local_dev_uploads_access_key_id" {
+  value = aws_iam_access_key.local_dev_uploads.id
+}
+output "local_dev_uploads_secret_access_key" {
+  value     = aws_iam_access_key.local_dev_uploads.secret
+  sensitive = true
+}

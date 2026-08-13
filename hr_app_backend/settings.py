@@ -150,6 +150,10 @@ AWS_REGION = get_env('AWS_REGION', 'us-east-1')
 BEDROCK_MODEL_ID = get_env('BEDROCK_MODEL_ID', 'us.amazon.nova-pro-v1:0')
 BEDROCK_MAX_TOKENS = get_int('BEDROCK_MAX_TOKENS', 1200)
 
+# File Management module (hr_app_backend.file_management): encrypts each
+# organization's own S3 access/secret keys at rest. See .env.example.
+FILE_STORAGE_ENCRYPTION_KEY = get_env('FILE_STORAGE_ENCRYPTION_KEY', '')
+
 CSRF_TRUSTED_ORIGINS = get_list('DJANGO_CSRF_TRUSTED_ORIGINS', default=[])
 
 # Default primary key field type

@@ -11,6 +11,7 @@ urlpatterns = [
     path('auth/', include('hr_app_backend.authentication.urls')),
     path('billing/', include('hr_app_backend.billing.urls')),
     path('employees/', include('hr_app_backend.employees.urls')),
+    path('files/', include('hr_app_backend.file_management.urls')),
     path('leave/', include('hr_app_backend.leave.urls')),
     path('payroll/', include('hr_app_backend.platform.payroll_v1_urls')),
     path('talent/', include('hr_app_backend.talent.urls')),

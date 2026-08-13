@@ -2,8 +2,6 @@ from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
-import boto3
-from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.http import JsonResponse
 from django.shortcuts import redirect
@@ -13,7 +11,11 @@ from django.views.decorators.http import require_http_methods
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.services import get_user_by_token, validate_employee_invite
 from hr_app_backend.authentication.views.helpers import error_response, token_from_request
-from hr_app_backend.utils.env import get_env
+from hr_app_backend.file_management.services.s3 import (
+    platform_bucket_name as _storage_bucket,
+    platform_s3_client as _s3_client,
+    safe_folder_key as _safe_folder,
+)
 from hr_app_backend.utils.errors import AppError, AuthenticationError, ValidationError
 
 
@@ -26,31 +28,6 @@ def _require_user(request):
     if user is None:
         raise AuthenticationError('Authentication credentials were not provided or are invalid.')
     return user
-
-
-def _s3_client():
-    region = get_env('AWS_REGION', 'us-east-1').strip()
-    endpoint_url = get_env('AWS_S3_ENDPOINT_URL', '').strip() or None
-    return boto3.client(
-        's3',
-        region_name=region,
-        endpoint_url=endpoint_url,
-        config=Config(signature_version='s3v4'),
-    )
-
-
-def _storage_bucket():
-    bucket = get_env('AWS_STORAGE_BUCKET_NAME', '').strip()
-    if not bucket:
-        raise AppError('S3 upload is not configured on the server.', status_code=500)
-    return bucket
-
-
-def _safe_folder(value):
-    parts = [part for part in value.strip().strip('/').split('/') if part]
-    if any(part in {'.', '..'} for part in parts):
-        raise ValidationError('Upload folder is invalid.')
-    return '/'.join(parts)
 
 
 @csrf_exempt

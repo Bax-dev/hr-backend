@@ -20,6 +20,7 @@ PUBLIC_PATHS = {
     "/api/v1/auth/login/",
     "/api/v1/auth/forgot-password/",
     "/api/v1/auth/reset-password/",
+    "/api/v1/files/{file_pk}/public/",
 }
 
 # App-driven API surface. Derived from the frontend code in
@@ -56,6 +57,17 @@ USED_OPERATIONS = {
     "/api/v1/employees/": {"get", "post"},
     "/api/v1/employees/me/": {"get", "patch"},
     "/api/v1/employees/{employee_pk}/": {"get", "patch", "delete"},
+    "/api/v1/files/": {"get", "post"},
+    "/api/v1/files/folders/": {"get", "post"},
+    "/api/v1/files/folders/{folder_pk}/": {"get", "patch", "delete"},
+    "/api/v1/files/presign/": {"post"},
+    "/api/v1/files/settings/s3/": {"get", "put", "patch"},
+    "/api/v1/files/settings/s3/test/": {"post"},
+    "/api/v1/files/{file_pk}/": {"get", "patch", "delete"},
+    "/api/v1/files/{file_pk}/download/": {"get"},
+    "/api/v1/files/{file_pk}/public/": {"get"},
+    "/api/v1/files/{file_pk}/shares/": {"get", "post"},
+    "/api/v1/files/{file_pk}/shares/{share_pk}/": {"delete"},
     "/api/v1/leave/": {"get", "post"},
     "/api/v1/leave/{leave_pk}/": {"patch", "delete"},
     "/api/v1/notifications/": {"get", "post"},
