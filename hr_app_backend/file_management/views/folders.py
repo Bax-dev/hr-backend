@@ -6,6 +6,7 @@ from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
 from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.pagination import paginated_data
 from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import serialize_folder, serialize_folder_share
@@ -31,8 +32,17 @@ def folders_view(request):
         user = require_user(request)
         if request.method == 'GET':
             parent_id = request.GET.get('parent_id') or request.GET.get('parentId')
-            folders = list_folders(user, parent_id)
-            return JsonResponse([serialize_folder(folder, user) for folder in folders], safe=False)
+            search = request.GET.get('search')
+            folders = list_folders(user, parent_id, search)
+            return JsonResponse({
+                'success': True,
+                'data': paginated_data(
+                    request,
+                    folders,
+                    lambda folder: serialize_folder(folder, user),
+                    key='folders',
+                ),
+            })
 
         folder = create_folder(user, parse_json_body(request))
         return JsonResponse(serialize_folder(folder, user), status=201)

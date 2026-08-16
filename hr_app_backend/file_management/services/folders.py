@@ -2,7 +2,8 @@ from django.db import transaction
 
 from hr_app_backend.utils.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
 
-from ..models import Folder, FolderShare
+from ..models import FileAsset, Folder, FolderShare
+from . import s3 as s3_service
 from .grantees import resolve_grantee
 from .permissions import require_organization, user_can_access_folder
 
@@ -14,6 +15,22 @@ def _clean_name(value):
     if '/' in name:
         raise ValidationError('Folder name cannot contain "/".')
     return name
+
+
+def _storage_source(organization):
+    _client, _bucket, source = s3_service.resolve_storage_if_configured(organization)
+    return source or s3_service.SOURCE_PLATFORM
+
+
+def _rewrite_keys_after_move(organization, old_prefix, new_prefix):
+    if not old_prefix or old_prefix == new_prefix:
+        return
+    for item in Folder.objects.filter(organization=organization, storage_key__startswith=old_prefix):
+        item.storage_key = new_prefix + item.storage_key[len(old_prefix):]
+        item.save(update_fields=['storage_key'])
+    for item in FileAsset.objects.filter(organization=organization, storage_key__startswith=old_prefix):
+        item.storage_key = new_prefix + item.storage_key[len(old_prefix):]
+        item.save(update_fields=['storage_key'])
 
 
 def _get_parent(organization, parent_id, user=None, level='manage'):
@@ -28,10 +45,13 @@ def _get_parent(organization, parent_id, user=None, level='manage'):
     return parent
 
 
-def list_folders(user, parent_id=None):
+def list_folders(user, parent_id=None, search=None):
     organization = require_organization(user)
     parent = _get_parent(organization, parent_id, user=user, level='view')
     folders = Folder.objects.filter(organization=organization, parent=parent)
+    term = (search or '').strip()
+    if term:
+        folders = folders.filter(name__icontains=term)
     return [folder for folder in folders if user_can_access_folder(user, folder, 'view')]
 
 
@@ -63,9 +83,13 @@ def create_folder(user, data):
     if Folder.objects.filter(organization=organization, parent=parent, name__iexact=name).exists():
         raise ConflictError('A folder with this name already exists here.')
 
-    return Folder.objects.create(
+    folder = Folder(
         organization=organization, parent=parent, name=name, visibility=visibility, created_by=user,
     )
+    folder.storage_key = s3_service.folder_prefix(folder, _storage_source(organization))
+    folder.save()
+    s3_service.ensure_folder(organization, folder)
+    return folder
 
 
 def _is_descendant(candidate, ancestor):
@@ -104,9 +128,19 @@ def update_folder(user, folder_pk, data):
             raise ValidationError('Invalid visibility value.')
         folder.visibility = visibility
 
+    old_prefix = folder.storage_key or s3_service.folder_prefix(folder, _storage_source(folder.organization))
     folder.parent = new_parent
     folder.name = new_name
-    folder.save()
+    new_prefix = s3_service.folder_prefix(folder, _storage_source(folder.organization))
+    if old_prefix != new_prefix:
+        s3_service.move_prefix(folder.organization, old_prefix, new_prefix)
+        folder.storage_key = new_prefix
+        folder.save()
+        _rewrite_keys_after_move(folder.organization, old_prefix, new_prefix)
+    else:
+        if not folder.storage_key:
+            folder.storage_key = new_prefix
+        folder.save()
     return folder
 
 
@@ -115,7 +149,11 @@ def delete_folder(user, folder_pk):
     folder = get_folder(user, folder_pk, level='manage')
     if folder.children.exists() or folder.files.filter(is_deleted=False).exists():
         raise ConflictError('Only an empty folder can be deleted.')
+    organization = folder.organization
+    prefix = folder.storage_key
     folder.delete()
+    if prefix:
+        s3_service.delete_folder_prefix(organization, prefix)
 
 
 # ----- Shares ----------------------------------------------------------------

@@ -23,16 +23,10 @@ from .views import (
     notification_inbox_read_view,
     notification_inbox_view,
     notifications_view,
-    personal_goal_detail_view,
-    personal_goals_view,
-    personal_workspace_view,
 )
 
 urlpatterns = [
     path('dashboard/overview/', dashboard_overview_view, name='dashboard-overview'),
-    path('personal/workspace/', personal_workspace_view, name='personal-workspace'),
-    path('personal/goals/', personal_goals_view, name='personal-goals'),
-    path('personal/goals/<uuid:goal_pk>/', personal_goal_detail_view, name='personal-goal-detail'),
     path('approvals/', approvals_view, name='approvals'),
     path('approvals/<uuid:record_pk>/', approval_detail_view, name='approval-detail'),
     path('communications/', communications_view, name='communications'),

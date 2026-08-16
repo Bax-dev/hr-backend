@@ -10,6 +10,7 @@ def serialize_company_profile(organization, settings):
         'website': settings.website,
         'logo': settings.logo,
         'icon_logo': settings.icon_logo,
+        'copilot_enabled': settings.copilot_enabled,
     }
 
 

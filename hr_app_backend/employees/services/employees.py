@@ -237,6 +237,9 @@ def list_employees(user, search=None, department=None, status=None):
             | Q(last_name__icontains=search)
             | Q(email__icontains=search)
             | Q(employee_id__icontains=search)
+            | Q(department__icontains=search)
+            | Q(department_record__name__icontains=search)
+            | Q(position__icontains=search)
         )
     if department:
         queryset = queryset.filter(
@@ -295,8 +298,8 @@ def get_my_employee(user):
     """Return the employee record linked to the signed-in user, if any.
 
     Staff accounts are provisioned with a UserProfile pointing at their
-    Employee record. Self-signed-up individuals (and company owners) have no
-    linked employee, so this returns ``None`` rather than raising.
+    Employee record. Company owners have no linked employee, so this returns
+    ``None`` rather than raising.
     """
     profile = getattr(user, 'profile', None)
     employee = getattr(profile, 'employee', None) if profile else None

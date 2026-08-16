@@ -107,13 +107,12 @@ def dashboard_overview_view(request):
             },
             'users': {
                 'total': UserProfile.objects.count(),
-                'employees': UserProfile.objects.filter(
-                    account_type=UserProfile.ACCOUNT_TYPE_COMPANY, employee__isnull=False
+                'employees': UserProfile.objects.exclude(
+                    account_type=UserProfile.ACCOUNT_TYPE_COMPANY, employee__isnull=True
                 ).count(),
                 'companyAdmins': UserProfile.objects.filter(
                     account_type=UserProfile.ACCOUNT_TYPE_COMPANY, employee__isnull=True
                 ).count(),
-                'individuals': UserProfile.objects.filter(account_type=UserProfile.ACCOUNT_TYPE_INDIVIDUAL).count(),
             },
             'employees': {'total': Employee.objects.count()},
             'subscriptions': {

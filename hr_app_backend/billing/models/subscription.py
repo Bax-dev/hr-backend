@@ -10,15 +10,11 @@ class Subscription(TimeStampedModel):
     PLAN_STARTER = 'starter'
     PLAN_GROWTH = 'growth'
     PLAN_ENTERPRISE = 'enterprise'
-    PLAN_INDIVIDUAL_ESSENTIAL = 'essential_2000'
-    PLAN_INDIVIDUAL_PREMIUM = 'premium'
     PLAN_CHOICES = [
-        (PLAN_FREE_TRIAL, 'Free Trial'),
-        (PLAN_STARTER, 'Starter'),
-        (PLAN_GROWTH, 'Growth'),
+        (PLAN_FREE_TRIAL, 'Free'),
+        (PLAN_STARTER, 'Essential'),
+        (PLAN_GROWTH, 'Premium'),
         (PLAN_ENTERPRISE, 'Enterprise'),
-        (PLAN_INDIVIDUAL_ESSENTIAL, 'Individual Essential'),
-        (PLAN_INDIVIDUAL_PREMIUM, 'Individual Premium'),
     ]
 
     PROVIDER_PAYSTACK = 'paystack'

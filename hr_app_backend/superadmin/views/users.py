@@ -11,14 +11,13 @@ from .helpers import require_superuser
 
 ROLE_EMPLOYEE = 'employee'
 ROLE_COMPANY_ADMIN = 'company_admin'
-ROLE_INDIVIDUAL = 'individual'
-ROLES = {ROLE_EMPLOYEE, ROLE_COMPANY_ADMIN, ROLE_INDIVIDUAL}
+ROLES = {ROLE_EMPLOYEE, ROLE_COMPANY_ADMIN}
 
 
 def _role_for(profile):
-    if profile.account_type == UserProfile.ACCOUNT_TYPE_INDIVIDUAL:
-        return ROLE_INDIVIDUAL
-    return ROLE_EMPLOYEE if profile.employee_id else ROLE_COMPANY_ADMIN
+    if profile.account_type == UserProfile.ACCOUNT_TYPE_COMPANY and not profile.employee_id:
+        return ROLE_COMPANY_ADMIN
+    return ROLE_EMPLOYEE
 
 
 def _serialize_user(profile):
@@ -47,13 +46,11 @@ def user_list_view(request):
         role = request.GET.get('role', '').strip()
         if role and role != 'all':
             if role not in ROLES:
-                raise ValidationError('role must be one of all, employee, company_admin, individual.')
-            if role == ROLE_EMPLOYEE:
-                profiles = profiles.filter(account_type=UserProfile.ACCOUNT_TYPE_COMPANY, employee__isnull=False)
-            elif role == ROLE_COMPANY_ADMIN:
+                raise ValidationError('role must be one of all, employee, company_admin.')
+            if role == ROLE_COMPANY_ADMIN:
                 profiles = profiles.filter(account_type=UserProfile.ACCOUNT_TYPE_COMPANY, employee__isnull=True)
             else:
-                profiles = profiles.filter(account_type=UserProfile.ACCOUNT_TYPE_INDIVIDUAL)
+                profiles = profiles.exclude(account_type=UserProfile.ACCOUNT_TYPE_COMPANY, employee__isnull=True)
 
         organization_id = request.GET.get('organization_id', '').strip()
         if organization_id:

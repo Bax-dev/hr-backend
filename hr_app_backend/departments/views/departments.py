@@ -6,6 +6,7 @@ from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
 from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.pagination import paginated_data
 from hr_app_backend.utils.throttles import throttle_view
 
 from ..serializers import department_payload, serialize_department
@@ -27,11 +28,19 @@ def departments_view(request):
     try:
         user = require_user(request)
         if request.method == 'GET':
-            departments, counts = list_departments(user)
-            return JsonResponse([
-                serialize_department(department, counts.get(department.name.strip().lower(), 0))
-                for department in departments
-            ], safe=False)
+            departments, counts = list_departments(user, search=request.GET.get('search'))
+            return JsonResponse({
+                'success': True,
+                'data': paginated_data(
+                    request,
+                    departments,
+                    lambda department: serialize_department(
+                        department,
+                        counts.get(department.name.strip().lower(), 0),
+                    ),
+                    key='departments',
+                ),
+            })
 
         payload = department_payload(parse_json_body(request))
         department = create_department(user, payload)

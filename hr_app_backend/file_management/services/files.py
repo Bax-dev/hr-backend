@@ -1,5 +1,4 @@
 from pathlib import Path
-from uuid import uuid4
 
 from botocore.exceptions import BotoCoreError, ClientError
 from django.db import transaction
@@ -59,13 +58,21 @@ def presign_upload(user, data):
 
     size = _validate_upload(content_type, data.get('file_size', data.get('fileSize')))
 
+    folder = None
     folder_id = data.get('folder_id') or data.get('folderId')
     if folder_id:
-        get_folder(user, folder_id, level='manage')  # must be able to add content to this folder
+        folder = get_folder(user, folder_id, level='manage')  # must be able to add content to this folder
 
     client, bucket, source = s3_service.resolve_storage(organization)
-    suffix = Path(filename).suffix.lower()
-    key = f'files/{organization.id}/{uuid4().hex}{suffix}'
+    if folder is not None:
+        prefix = s3_service.ensure_folder(organization, folder)
+        if prefix and folder.storage_key != prefix:
+            folder.storage_key = prefix
+            folder.save(update_fields=['storage_key'])
+    else:
+        s3_service.ensure_library_root(organization)
+
+    key = s3_service.object_key(organization, folder, filename, source)
 
     try:
         url = s3_service.generate_upload_url(client, bucket, key, content_type)
@@ -102,8 +109,17 @@ def register_file(user, data, request=None):
     if folder_id:
         folder = get_folder(user, folder_id, level='manage')
 
+    _client, _bucket, source = s3_service.resolve_storage(organization)
+    expected_prefix = (
+        folder.storage_key
+        if folder is not None and folder.storage_key
+        else s3_service.library_prefix(organization, source)
+    )
+    if expected_prefix and not key.startswith(expected_prefix):
+        raise ValidationError('Upload key does not match this folder.')
+
     default_visibility = FileAsset.VISIBILITY_PRIVATE
-    config = getattr(organization, 's3_configuration', None)
+    config = s3_service.org_s3_config(organization)
     if config is not None and config.is_active:
         default_visibility = config.default_visibility
 
@@ -170,7 +186,24 @@ def update_file(user, file_pk, data, request=None):
 
     if 'folder_id' in data or 'folderId' in data:
         folder_id = data.get('folder_id', data.get('folderId'))
-        file_asset.folder = get_folder(user, folder_id, level='manage') if folder_id else None
+        new_folder = get_folder(user, folder_id, level='manage') if folder_id else None
+        new_folder_id = new_folder.id if new_folder is not None else None
+        if new_folder_id != file_asset.folder_id:
+            _client, _bucket, source = s3_service.resolve_storage(file_asset.organization)
+            if new_folder is not None:
+                prefix = s3_service.ensure_folder(file_asset.organization, new_folder)
+                if prefix and new_folder.storage_key != prefix:
+                    new_folder.storage_key = prefix
+                    new_folder.save(update_fields=['storage_key'])
+            dest_key = s3_service.object_key(
+                file_asset.organization,
+                new_folder,
+                file_asset.original_filename or file_asset.name,
+                source,
+            )
+            s3_service.move_object(file_asset.organization, file_asset.storage_key, dest_key)
+            file_asset.storage_key = dest_key
+        file_asset.folder = new_folder
 
     if 'visibility' in data:
         visibility = data.get('visibility')
@@ -196,6 +229,9 @@ def update_file(user, file_pk, data, request=None):
 @transaction.atomic
 def delete_file(user, file_pk, request=None):
     file_asset = get_file(user, file_pk, level='manage')
+    client, bucket, _source = s3_service.resolve_storage_if_configured(file_asset.organization)
+    if client is not None:
+        s3_service.delete_object(client, bucket, file_asset.storage_key)
     file_asset.is_deleted = True
     file_asset.deleted_at = timezone.now()
     file_asset.save(update_fields=['is_deleted', 'deleted_at', 'updated_at'])

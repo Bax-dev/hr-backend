@@ -12,8 +12,11 @@ from hr_app_backend.utils.throttles import throttle_view
 from ..serializers import (
     office_location_payload,
     punch_payload,
+    remote_mark_payload,
+    remote_workers_payload,
     serialize_attendance_record,
     serialize_office_location,
+    serialize_remote_workers,
 )
 from ..services import (
     check_in,
@@ -23,6 +26,9 @@ from ..services import (
     get_location,
     list_attendance,
     list_locations,
+    list_remote_workers,
+    mark_remote,
+    set_remote_workers,
     update_location,
 )
 from .helpers import require_user
@@ -38,6 +44,8 @@ def attendance_view(request):
             date=request.GET.get('date'),
             status=request.GET.get('status'),
             employee_id=request.GET.get('employee_id') or request.GET.get('employeeId'),
+            search=request.GET.get('search'),
+            work_mode=request.GET.get('work_mode') or request.GET.get('workMode'),
         )
         return JsonResponse({
             'success': True,
@@ -107,5 +115,43 @@ def check_out_view(request):
         user = require_user(request)
         record = check_out(user, punch_payload(parse_json_body(request)))
         return JsonResponse({'success': True, 'data': {'record': serialize_attendance_record(record)}})
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def mark_remote_view(request):
+    try:
+        user = require_user(request)
+        result = mark_remote(user, remote_mark_payload(parse_json_body(request)))
+        created = [serialize_attendance_record(record) for record in result['created']]
+        skipped = [serialize_attendance_record(record) for record in result['skipped']]
+        return JsonResponse(
+            {
+                'success': True,
+                'data': {
+                    'records': created,
+                    'skipped': skipped,
+                    'created_count': len(created),
+                    'skipped_count': len(skipped),
+                },
+            },
+            status=201 if created else 200,
+        )
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'PUT', 'PATCH'])
+def remote_workers_view(request):
+    try:
+        user = require_user(request)
+        if request.method == 'GET':
+            employees = list_remote_workers(user)
+        else:
+            employees = set_remote_workers(user, remote_workers_payload(parse_json_body(request)))
+        return JsonResponse({'success': True, 'data': serialize_remote_workers(employees)})
     except AppError as exc:
         return error_response(exc)

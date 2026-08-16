@@ -184,20 +184,3 @@ class PlatformRecord(TimeStampedModel):
 
     class Meta:
         ordering = ['-updated_at', '-created_at']
-
-
-class PersonalGoal(TimeStampedModel):
-    PRIORITY_LOW = 'low'
-    PRIORITY_MEDIUM = 'medium'
-    PRIORITY_HIGH = 'high'
-    PRIORITIES = [(PRIORITY_LOW, 'Low'), (PRIORITY_MEDIUM, 'Medium'), (PRIORITY_HIGH, 'High')]
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='personal_goals')
-    title = models.CharField(max_length=255)
-    completed = models.BooleanField(default=False)
-    priority = models.CharField(max_length=10, choices=PRIORITIES, default=PRIORITY_MEDIUM)
-    category = models.CharField(max_length=80, blank=True)
-    due_date = models.DateField(null=True, blank=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        ordering = ['completed', '-created_at']

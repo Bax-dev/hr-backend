@@ -81,7 +81,12 @@ def list_teams(user, *, search=None, department_id=None):
     organization = _require_company_account(user)
     queryset = Team.objects.filter(organization=organization).select_related('department').annotate(member_count=Count('members'))
     if search:
-        queryset = queryset.filter(Q(name__icontains=search) | Q(lead__icontains=search))
+        queryset = queryset.filter(
+            Q(name__icontains=search)
+            | Q(lead__icontains=search)
+            | Q(description__icontains=search)
+            | Q(department__name__icontains=search)
+        )
     if department_id:
         queryset = queryset.filter(department_id=department_id)
     return queryset.order_by('name')
@@ -140,7 +145,9 @@ def list_designations(user, *, search=None):
     organization = _require_company_account(user)
     queryset = Designation.objects.filter(organization=organization).annotate(employee_count=Count('employees'))
     if search:
-        queryset = queryset.filter(Q(title__icontains=search) | Q(level__icontains=search))
+        queryset = queryset.filter(
+            Q(title__icontains=search) | Q(level__icontains=search) | Q(description__icontains=search)
+        )
     return queryset.order_by('title')
 
 

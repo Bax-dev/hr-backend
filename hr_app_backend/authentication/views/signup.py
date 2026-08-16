@@ -6,8 +6,8 @@ from hr_app_backend.utils.errors import AppError
 from hr_app_backend.utils.idempotency import idempotent
 from hr_app_backend.utils.throttles import throttle, throttle_view
 
-from ..serializers import company_signup_payload, forgot_password_payload, individual_signup_payload, verify_otp_payload
-from ..services import auth_response, register_company, register_individual, resend_signup_otp, verify_signup_otp
+from ..serializers import company_signup_payload, forgot_password_payload, verify_otp_payload
+from ..services import auth_response, register_company, resend_signup_otp, verify_signup_otp
 from .helpers import error_response, load_json, session_json_response
 
 
@@ -18,18 +18,6 @@ from .helpers import error_response, load_json, session_json_response
 def signup_company_view(request):
     try:
         user = register_company(company_signup_payload(load_json(request)))
-        return JsonResponse({'success': True, 'data': {'email': user.email, 'expires_in': 600}}, status=201)
-    except AppError as exc:
-        return error_response(exc)
-
-
-@csrf_exempt
-@require_POST
-@throttle_view('auth:signup', '5/min')
-@idempotent('auth:signup:individual')
-def signup_individual_view(request):
-    try:
-        user = register_individual(individual_signup_payload(load_json(request)))
         return JsonResponse({'success': True, 'data': {'email': user.email, 'expires_in': 600}}, status=201)
     except AppError as exc:
         return error_response(exc)

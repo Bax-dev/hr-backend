@@ -21,6 +21,7 @@ from .folders import (
     revoke_folder_share,
     update_folder,
 )
+from .search import search_library
 from .s3_settings import get_s3_settings, test_s3_connection, update_s3_settings
 
 __all__ = [
@@ -42,6 +43,7 @@ __all__ = [
     'resolve_public_download_url',
     'revoke_folder_share',
     'revoke_share',
+    'search_library',
     'test_s3_connection',
     'update_file',
     'update_folder',

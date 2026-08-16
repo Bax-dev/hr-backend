@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.validators import validate_email
 
@@ -33,9 +34,24 @@ def talent_summary(user):
     }
 
 
-def list_jobs(user):
+def list_jobs(user, search=None, status=None, job_type=None):
     organization = require_organization(user)
-    return JobPosting.objects.filter(organization=organization)
+    queryset = JobPosting.objects.filter(organization=organization)
+    term = (search or '').strip()
+    if term:
+        queryset = queryset.filter(
+            Q(title__icontains=term)
+            | Q(department__icontains=term)
+            | Q(location__icontains=term)
+            | Q(description__icontains=term)
+            | Q(status__icontains=term)
+            | Q(type__icontains=term)
+        )
+    if status:
+        queryset = queryset.filter(status__iexact=status.strip())
+    if job_type:
+        queryset = queryset.filter(type__iexact=job_type.strip())
+    return queryset
 
 
 def get_job(user, job_id):

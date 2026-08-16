@@ -12,6 +12,6 @@ class OfficeLocationAdmin(admin.ModelAdmin):
 
 @admin.register(AttendanceRecord)
 class AttendanceRecordAdmin(admin.ModelAdmin):
-    list_display = ('employee', 'date', 'check_in', 'check_out', 'status', 'location', 'organization')
+    list_display = ('employee', 'date', 'check_in', 'check_out', 'status', 'work_mode', 'location', 'organization')
     search_fields = ('employee__first_name', 'employee__last_name', 'employee__employee_id')
-    list_filter = ('status', 'date', 'location')
+    list_filter = ('status', 'work_mode', 'date', 'location')

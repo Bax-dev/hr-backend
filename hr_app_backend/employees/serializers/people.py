@@ -100,7 +100,7 @@ def serialize_team(team, member_count=0):
 
 def serialize_designation(designation, employee_count=0):
     return {
-        'id': designation.id,
+        'id': str(designation.id),
         'title': designation.title,
         'level': designation.level or None,
         'description': designation.description or None,

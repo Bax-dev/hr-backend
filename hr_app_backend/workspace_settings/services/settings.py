@@ -10,6 +10,32 @@ from ..models import WorkspaceSettings
 VALID_WORK_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 
 
+def _clean_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {'true', '1', 'yes', 'on'}:
+            return True
+        if normalized in {'false', '0', 'no', 'off'}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    raise ValidationError('Value must be true or false.')
+
+
+def is_copilot_enabled(organization):
+    """Whether this organization should show and serve the HR Copilot.
+
+    Missing workspace settings default to enabled so existing companies keep
+    the assistant until an admin turns it off.
+    """
+    if organization is None:
+        return True
+    settings = WorkspaceSettings.objects.filter(organization_id=organization.id).only('copilot_enabled').first()
+    return True if settings is None else settings.copilot_enabled
+
+
 def _require_organization(user):
     profile = getattr(user, 'profile', None)
     organization = getattr(profile, 'organization', None) if profile else None
@@ -60,6 +86,8 @@ def update_company_profile(user, data):
         settings.logo = str(data['logo']).strip()
     if data.get('icon_logo') is not None:
         settings.icon_logo = str(data['icon_logo']).strip()
+    if data.get('copilot_enabled') is not None:
+        settings.copilot_enabled = _clean_bool(data['copilot_enabled'])
 
     with transaction.atomic():
         organization.save()

@@ -19,12 +19,20 @@ class AttendanceRecord(TimeStampedModel):
         (STATUS_EARLY_DEPARTURE, 'Early Departure'),
     ]
 
+    WORK_MODE_ONSITE = 'onsite'
+    WORK_MODE_REMOTE = 'remote'
+    WORK_MODES = [
+        (WORK_MODE_ONSITE, 'On-site'),
+        (WORK_MODE_REMOTE, 'Remote'),
+    ]
+
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='attendance_records')
     employee = models.ForeignKey(Employee, on_delete=models.CASCADE, related_name='attendance_records')
     date = models.DateField()
     check_in = models.TimeField()
     check_out = models.TimeField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_PRESENT)
+    work_mode = models.CharField(max_length=20, choices=WORK_MODES, default=WORK_MODE_ONSITE)
     location = models.ForeignKey(OfficeLocation, null=True, blank=True, on_delete=models.SET_NULL, related_name='attendance_records')
     # Coordinates reported by the device at punch time, kept for auditing.
     check_in_latitude = models.DecimalField(max_digits=9, decimal_places=6, null=True, blank=True)

@@ -1,5 +1,5 @@
 from ..serializers import serialize_user
-from .accounts import change_password, delete_account, login_user, register_company, register_individual
+from .accounts import change_password, delete_account, login_user, register_company
 from .password_reset import reset_password, send_password_reset_otp, verify_password_reset_otp
 from .sessions import auth_response, create_session, destroy_all_sessions_for_user, destroy_session, get_user_by_token
 from .employee_invites import accept_employee_invite, create_employee_invite_token, employee_invite_details, validate_employee_invite
@@ -19,7 +19,6 @@ __all__ = [
     'get_user_by_token',
     'login_user',
     'register_company',
-    'register_individual',
     'resend_signup_otp',
     'reset_password',
     'serialize_user',

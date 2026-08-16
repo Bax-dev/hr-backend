@@ -21,8 +21,13 @@ def serialize_attendance_record(record):
         'check_in': record.check_in.strftime('%H:%M'),
         'check_out': record.check_out.strftime('%H:%M') if record.check_out else None,
         'status': record.get_status_display(),
+        'work_mode': record.work_mode,
         'hours_worked': _hours_worked(record),
-        'location_name': record.location.name if record.location else None,
+        'location_name': (
+            record.location.name
+            if record.location
+            else ('Remote' if record.work_mode == record.WORK_MODE_REMOTE else None)
+        ),
     }
 
 
@@ -34,4 +39,17 @@ def serialize_office_location(location):
         'latitude': float(location.latitude),
         'longitude': float(location.longitude),
         'radius_meters': location.radius_meters,
+    }
+
+
+def serialize_remote_workers(employees):
+    return {
+        'employee_ids': [str(employee.id) for employee in employees],
+        'employees': [
+            {
+                'id': str(employee.id),
+                'employee_name': f'{employee.first_name} {employee.last_name}'.strip(),
+            }
+            for employee in employees
+        ],
     }

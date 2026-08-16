@@ -26,6 +26,7 @@ def leaves_view(request):
                 user,
                 status=request.GET.get('status'),
                 employee_id=request.GET.get('employee_id') or request.GET.get('employeeId'),
+                search=request.GET.get('search'),
             )
             return JsonResponse({
                 'success': True,

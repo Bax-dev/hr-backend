@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 import re
 
 from hr_app_backend.utils.errors import ConflictError, NotFoundError, PermissionDeniedError, ValidationError
@@ -39,9 +40,12 @@ def _clean_color(value):
     return color.lower()
 
 
-def list_departments(user):
+def list_departments(user, search=None):
     organization = _require_organization(user)
     departments = Department.objects.filter(organization=organization).order_by('name')
+    term = (search or '').strip()
+    if term:
+        departments = departments.filter(Q(name__icontains=term) | Q(manager__icontains=term))
     employees = Employee.objects.filter(organization=organization).values_list('department', flat=True)
     counts = {}
     for department_name in employees:

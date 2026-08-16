@@ -57,44 +57,6 @@ def register_company(data):
     return user
 
 
-@transaction.atomic
-def register_individual(data, *, allow_paid_plan=False):
-    full_name = (data.get('full_name') or '').strip()
-    email = normalize_email(data.get('email'))
-    invite_code = (data.get('invite_code') or '').strip()
-    password = data.get('password') or ''
-    confirm_password = data.get('confirm_password') or ''
-    plan = (data.get('plan') or UserProfile.INDIVIDUAL_PLAN_FREE).strip().lower()
-
-    if not full_name:
-        raise ValidationError('Full name is required.')
-    validate_email_address(email)
-    validate_passwords(password, confirm_password)
-    if plan not in dict(UserProfile.INDIVIDUAL_PLAN_CHOICES):
-        raise ValidationError('Plan must be free, essential_2000, or premium.')
-
-    if User.objects.filter(email=email).exists():
-        raise ConflictError('An account with this email already exists.')
-
-    first_name, _, last_name = full_name.partition(' ')
-    user = User.objects.create_user(
-        username=email,
-        email=email,
-        password=password,
-        first_name=first_name,
-        last_name=last_name,
-    )
-    UserProfile.objects.create(
-        user=user,
-        account_type=UserProfile.ACCOUNT_TYPE_INDIVIDUAL,
-        full_name=full_name,
-        invite_code=invite_code,
-        individual_plan=plan if allow_paid_plan else UserProfile.INDIVIDUAL_PLAN_FREE,
-    )
-    send_signup_otp(user)
-    return user
-
-
 def login_user(data):
     email = normalize_email(data.get('email'))
     password = data.get('password') or ''

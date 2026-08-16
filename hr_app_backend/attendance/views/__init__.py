@@ -4,6 +4,8 @@ from .attendance import (
     check_out_view,
     location_detail_view,
     locations_view,
+    mark_remote_view,
+    remote_workers_view,
 )
 
 __all__ = [
@@ -12,4 +14,6 @@ __all__ = [
     'check_out_view',
     'location_detail_view',
     'locations_view',
+    'mark_remote_view',
+    'remote_workers_view',
 ]

@@ -5,6 +5,7 @@ from .files import (
     file_share_detail_view,
     file_shares_view,
     files_presign_view,
+    files_search_view,
     files_view,
 )
 from .folders import folder_detail_view, folder_share_detail_view, folder_shares_view, folders_view
@@ -17,6 +18,7 @@ __all__ = [
     'file_share_detail_view',
     'file_shares_view',
     'files_presign_view',
+    'files_search_view',
     'files_view',
     'folder_detail_view',
     'folder_share_detail_view',

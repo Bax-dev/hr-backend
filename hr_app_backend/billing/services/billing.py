@@ -21,12 +21,6 @@ PLAN_PRICES = {
         'monthly': Decimal('35000.00'),
         'annual': Decimal('350000.00'),
     },
-    Subscription.PLAN_INDIVIDUAL_ESSENTIAL: {
-        'monthly': Decimal('2000.00'),
-    },
-    Subscription.PLAN_INDIVIDUAL_PREMIUM: {
-        'monthly': Decimal('7000.00'),
-    },
 }
 
 TRIAL_DURATION_DAYS = 14
@@ -161,18 +155,10 @@ def initialize_subscription_payment(user, payload):
     plan = payload['plan']
     provider = payload['provider']
     billing_cycle = payload.get('billing_cycle') or 'monthly'
-    is_individual = getattr(profile, 'account_type', None) == 'individual'
-    individual_plans = {Subscription.PLAN_INDIVIDUAL_ESSENTIAL, Subscription.PLAN_INDIVIDUAL_PREMIUM}
-    if is_individual:
-        raise ValidationError('Personal subscriptions are no longer available. Use company signup to choose a plan.')
+    if getattr(profile, 'account_type', None) == 'individual':
+        raise ValidationError('Personal subscriptions are not available. Use company signup to choose a plan.')
     if organization is None:
         raise ValidationError('A subscription owner is required.')
-    if is_individual and plan not in individual_plans:
-        raise ValidationError('Individual accounts must choose Essential or Premium.')
-    if not is_individual and plan in individual_plans:
-        raise ValidationError('Individual plans are not available to company accounts.')
-    if is_individual and billing_cycle != 'monthly':
-        raise ValidationError('Individual plans are billed monthly.')
     amount = _resolve_amount(plan, payload, billing_cycle=billing_cycle)
     start_date, end_date = _resolve_dates(plan, payload, billing_cycle=billing_cycle)
     email = (payload.get('email') or user.email or (organization.email if organization else '')).strip()
@@ -187,9 +173,8 @@ def initialize_subscription_payment(user, payload):
         raise ValidationError('Callback URL is required for Paystack payments.')
 
     if plan != Subscription.PLAN_FREE_TRIAL:
-        owner_filter = {'created_by': user} if is_individual else {'organization': organization}
         pending_subscription = Subscription.objects.filter(
-            **owner_filter,
+            organization=organization,
             plan=plan,
             provider=provider,
             status=Subscription.STATUS_PENDING,
@@ -254,10 +239,4 @@ def verify_subscription_payment(user, payload):
     else:
         response, paid = _verify_flutterwave(subscription)
 
-    if paid and organization is None and subscription.plan in {
-        Subscription.PLAN_INDIVIDUAL_ESSENTIAL,
-        Subscription.PLAN_INDIVIDUAL_PREMIUM,
-    }:
-        profile.individual_plan = subscription.plan
-        profile.save(update_fields=['individual_plan', 'updated_at'])
     return subscription, response, paid

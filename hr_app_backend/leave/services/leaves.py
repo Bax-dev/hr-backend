@@ -3,6 +3,7 @@ import logging
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
+from django.db.models import Q
 
 from hr_app_backend.services import render_email_template
 from hr_app_backend.third_parties import get_email_service
@@ -129,7 +130,7 @@ def _resolve_employee(user, organization, data):
     return _get_employee(organization, data['employee_id'])
 
 
-def list_leaves(user, status=None, employee_id=None):
+def list_leaves(user, status=None, employee_id=None, search=None):
     organization = _require_organization(user)
     queryset = LeaveRequest.objects.select_related('employee').filter(organization=organization)
 
@@ -139,10 +140,25 @@ def list_leaves(user, status=None, employee_id=None):
             return queryset.none()
         queryset = queryset.filter(employee=employee)
 
-    if status:
+    status_value = (status or '').strip().lower()
+    if status_value in {'history', 'processed'}:
+        queryset = queryset.exclude(status=LeaveRequest.STATUS_PENDING)
+    elif status:
         queryset = queryset.filter(status=_clean_status(status))
     if employee_id and not _is_individual(user):
         queryset = queryset.filter(employee_id=employee_id)
+
+    term = (search or '').strip()
+    if term:
+        queryset = queryset.filter(
+            Q(employee__first_name__icontains=term)
+            | Q(employee__last_name__icontains=term)
+            | Q(employee__employee_id__icontains=term)
+            | Q(employee__department__icontains=term)
+            | Q(leave_type__icontains=term)
+            | Q(reason__icontains=term)
+            | Q(status__icontains=term)
+        )
 
     return queryset
 

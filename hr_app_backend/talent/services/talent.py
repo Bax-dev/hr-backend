@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 
 from hr_app_backend.utils.errors import ValidationError
 
@@ -6,13 +7,25 @@ from ..models import OffboardingPlan, OnboardingPlan, PerformanceReview
 from .helpers import clean_bool, clean_date, clean_priority, clean_status, clean_text, get_record, require_organization
 
 
-def _list_records(user, model):
+def _list_records(user, model, search=None, search_fields=()):
     organization = require_organization(user)
-    return model.objects.filter(organization=organization)
+    queryset = model.objects.filter(organization=organization)
+    term = (search or '').strip()
+    if term and search_fields:
+        query = Q()
+        for field in search_fields:
+            query |= Q(**{f'{field}__icontains': term})
+        queryset = queryset.filter(query)
+    return queryset
 
 
-def list_onboarding(user):
-    return _list_records(user, OnboardingPlan)
+def list_onboarding(user, search=None):
+    return _list_records(
+        user,
+        OnboardingPlan,
+        search=search,
+        search_fields=('employee_name', 'owner', 'status', 'notes'),
+    )
 
 
 def get_onboarding(user, record_pk):
@@ -66,8 +79,13 @@ def delete_onboarding(user, record_pk):
     get_onboarding(user, record_pk).delete()
 
 
-def list_performance(user):
-    return _list_records(user, PerformanceReview)
+def list_performance(user, search=None):
+    return _list_records(
+        user,
+        PerformanceReview,
+        search=search,
+        search_fields=('employee_name', 'review_cycle', 'priority', 'status', 'notes'),
+    )
 
 
 def get_performance(user, record_pk):
@@ -115,8 +133,13 @@ def delete_performance(user, record_pk):
     get_performance(user, record_pk).delete()
 
 
-def list_offboarding(user):
-    return _list_records(user, OffboardingPlan)
+def list_offboarding(user, search=None):
+    return _list_records(
+        user,
+        OffboardingPlan,
+        search=search,
+        search_fields=('employee_name', 'owner', 'status', 'notes'),
+    )
 
 
 def get_offboarding(user, record_pk):

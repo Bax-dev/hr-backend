@@ -4,7 +4,7 @@ from hr_app_backend.utils.errors import ValidationError
 
 
 ALLOWED_PROVIDERS = {'paystack'}
-ALLOWED_PLANS = {'free_trial', 'starter', 'growth', 'enterprise', 'essential_2000', 'premium'}
+ALLOWED_PLANS = {'free_trial', 'starter', 'growth', 'enterprise'}
 
 
 def _value(payload, *keys, default=''):

@@ -26,6 +26,9 @@ class Folder(TimeStampedModel):
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+'
     )
+    # S3 object-key prefix (always trailing '/'), so the folder is visible in the
+    # bucket and files uploaded into it land under the same path.
+    storage_key = models.CharField(max_length=1024, blank=True)
 
     class Meta:
         ordering = ['name']

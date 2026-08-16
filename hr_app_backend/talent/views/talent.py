@@ -51,7 +51,7 @@ def onboarding_view(request):
     try:
         user = require_user(request)
         if request.method == 'GET':
-            return collection_response('records', list_onboarding(user), serialize_onboarding)
+            return collection_response(request, 'records', list_onboarding(user, search=request.GET.get('search')), serialize_onboarding)
         record = create_onboarding(user, onboarding_payload(parse_json_body(request)))
         return detail_response('record', record, serialize_onboarding, status=201)
     except AppError as exc:
@@ -80,7 +80,7 @@ def performance_view(request):
     try:
         user = require_user(request)
         if request.method == 'GET':
-            return collection_response('records', list_performance(user), serialize_performance)
+            return collection_response(request, 'records', list_performance(user, search=request.GET.get('search')), serialize_performance)
         record = create_performance(user, performance_payload(parse_json_body(request)))
         return detail_response('record', record, serialize_performance, status=201)
     except AppError as exc:
@@ -109,7 +109,7 @@ def offboarding_view(request):
     try:
         user = require_user(request)
         if request.method == 'GET':
-            return collection_response('records', list_offboarding(user), serialize_offboarding)
+            return collection_response(request, 'records', list_offboarding(user, search=request.GET.get('search')), serialize_offboarding)
         record = create_offboarding(user, offboarding_payload(parse_json_body(request)))
         return detail_response('record', record, serialize_offboarding, status=201)
     except AppError as exc:

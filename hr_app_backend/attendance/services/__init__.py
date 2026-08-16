@@ -6,6 +6,9 @@ from .attendance import (
     get_location,
     list_attendance,
     list_locations,
+    list_remote_workers,
+    mark_remote,
+    set_remote_workers,
     update_location,
 )
 
@@ -17,5 +20,8 @@ __all__ = [
     'get_location',
     'list_attendance',
     'list_locations',
+    'list_remote_workers',
+    'mark_remote',
+    'set_remote_workers',
     'update_location',
 ]

@@ -6,7 +6,7 @@ from .models import FileAsset, FileShare, Folder, FolderShare, S3Configuration
 @admin.register(Folder)
 class FolderAdmin(admin.ModelAdmin):
     list_display = ('name', 'organization', 'parent', 'visibility', 'created_by', 'created_at')
-    search_fields = ('name', 'organization__name')
+    search_fields = ('name', 'organization__name', 'storage_key')
     list_filter = ('visibility',)
 
 

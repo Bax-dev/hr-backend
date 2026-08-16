@@ -6,6 +6,7 @@ from django.views.decorators.http import require_http_methods
 
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.pagination import paginated_data
 
 from ..models import Employee
 from ..services import list_employees
@@ -76,6 +77,18 @@ def celebrations_view(request):
                     )
 
         celebrations.sort(key=lambda item: (item['daysUntil'], item['employeeName']))
-        return JsonResponse(celebrations, safe=False)
+        search = (request.GET.get('search') or '').strip().lower()
+        if search:
+            celebrations = [
+                item for item in celebrations
+                if search in item['employeeName'].lower()
+                or search in (item.get('department') or '').lower()
+                or search in (item.get('position') or '').lower()
+                or search in item['type'].replace('_', ' ').lower()
+            ]
+        return JsonResponse({
+            'success': True,
+            'data': paginated_data(request, celebrations, lambda item: item, key='celebrations'),
+        })
     except AppError as exc:
         return error_response(exc)

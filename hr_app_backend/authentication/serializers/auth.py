@@ -31,17 +31,6 @@ def company_signup_payload(payload):
     }
 
 
-def individual_signup_payload(payload):
-    return {
-        'full_name': _value(payload, 'full_name', 'fullName'),
-        'email': _value(payload, 'email'),
-        'invite_code': _value(payload, 'invite_code', 'inviteCode'),
-        'password': _value(payload, 'password'),
-        'confirm_password': _value(payload, 'confirm_password', 'confirmPassword'),
-        'plan': _value(payload, 'plan', default='free'),
-    }
-
-
 def login_payload(payload):
     return {
         'email': _value(payload, 'email'),

@@ -1,8 +1,9 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from uuid import UUID
+import json
 
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
@@ -18,10 +19,11 @@ from hr_app_backend.employees.views.helpers import require_user
 from hr_app_backend.leave.models import LeaveRequest
 from hr_app_backend.utils.errors import AppError, NotFoundError, PermissionDeniedError, ValidationError
 from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.pagination import paginated_data
 from hr_app_backend.utils.throttles import throttle_view
 
 from .bulk_notifications import enqueue_bulk_notification
-from .models import Announcement, BulkNotification, Notification, PayrollRecord, PersonalGoal, PlatformRecord
+from .models import Announcement, BulkNotification, Notification, PayrollRecord, PlatformRecord
 from .notifications_service import create_notification
 
 PLATFORM_MODULE_CONFIG = {
@@ -77,116 +79,8 @@ def _is_individual_account(user):
     return getattr(profile, 'account_type', None) == UserProfile.ACCOUNT_TYPE_INDIVIDUAL
 
 
-def _personal_user(request):
-    user = require_user(request)
-    if not _is_individual_account(user):
-        raise PermissionDeniedError('Personal workspace tools are available to individual accounts only.')
-    return user
-
-
-def _serialize_personal_goal(goal):
-    return {
-        'id': str(goal.id),
-        'title': goal.title,
-        'completed': goal.completed,
-        'priority': goal.priority,
-        'category': goal.category,
-        'dueDate': goal.due_date.isoformat() if goal.due_date else None,
-        'completedAt': goal.completed_at.isoformat() if goal.completed_at else None,
-        'createdAt': goal.created_at.isoformat(),
-        'updatedAt': goal.updated_at.isoformat(),
-    }
-
-
-@csrf_exempt
-@require_http_methods(['GET'])
-def personal_workspace_view(request):
-    try:
-        user = _personal_user(request)
-        goals = PersonalGoal.objects.filter(user=user)
-        return JsonResponse({'success': True, 'data': {
-            'goals': [_serialize_personal_goal(goal) for goal in goals],
-        }})
-    except AppError as exc:
-        return error_response(exc)
-
-
-@csrf_exempt
-@require_http_methods(['POST'])
-def personal_goals_view(request):
-    try:
-        user = _personal_user(request)
-        payload = parse_json_body(request)
-        title = str(payload.get('title', '')).strip()
-        if not title:
-            raise ValidationError('Goal title is required.')
-        if len(title) > 255:
-            raise ValidationError('Goal title cannot exceed 255 characters.')
-        profile = user.profile
-        priority = str(payload.get('priority', PersonalGoal.PRIORITY_MEDIUM)).strip().lower()
-        category = str(payload.get('category', '')).strip()
-        due_date_value = str(payload.get('due_date', '')).strip()
-        if priority not in dict(PersonalGoal.PRIORITIES):
-            raise ValidationError('Priority must be low, medium, or high.')
-        if len(category) > 80:
-            raise ValidationError('Category cannot exceed 80 characters.')
-        try:
-            due_date = date.fromisoformat(due_date_value) if due_date_value else None
-        except ValueError as exc:
-            raise ValidationError('Due date must be a valid date.') from exc
-        plan = profile.individual_plan or UserProfile.INDIVIDUAL_PLAN_FREE
-        if plan == UserProfile.INDIVIDUAL_PLAN_FREE and (due_date or category or priority != PersonalGoal.PRIORITY_MEDIUM):
-            raise PermissionDeniedError('Priority and due-date planning require Essential or Premium.')
-        if plan != UserProfile.INDIVIDUAL_PLAN_PREMIUM and category:
-            raise PermissionDeniedError('Custom goal categories require Premium.')
-        goal_limits = {
-            UserProfile.INDIVIDUAL_PLAN_FREE: 3,
-            UserProfile.INDIVIDUAL_PLAN_ESSENTIAL: 25,
-            UserProfile.INDIVIDUAL_PLAN_PREMIUM: None,
-        }
-        limit = goal_limits.get(profile.individual_plan or UserProfile.INDIVIDUAL_PLAN_FREE, 3)
-        active_count = PersonalGoal.objects.filter(user=user, completed=False).count()
-        if limit is not None and active_count >= limit:
-            raise PermissionDeniedError(
-                f'Your {profile.get_individual_plan_display() or "Free"} plan allows up to {limit} active goals.'
-            )
-        goal = PersonalGoal.objects.create(user=user, title=title, priority=priority, category=category, due_date=due_date)
-        return JsonResponse({'success': True, 'data': {'goal': _serialize_personal_goal(goal)}}, status=201)
-    except AppError as exc:
-        return error_response(exc)
-
-
-@csrf_exempt
-@require_http_methods(['PATCH', 'DELETE'])
-def personal_goal_detail_view(request, goal_pk):
-    try:
-        user = _personal_user(request)
-        try:
-            goal = PersonalGoal.objects.get(user=user, pk=goal_pk)
-        except PersonalGoal.DoesNotExist as exc:
-            raise NotFoundError('Personal goal not found.') from exc
-        if request.method == 'DELETE':
-            goal.delete()
-            return JsonResponse({'success': True, 'message': 'Personal goal deleted.'})
-        payload = parse_json_body(request)
-        if 'title' in payload:
-            title = str(payload['title']).strip()
-            if not title or len(title) > 255:
-                raise ValidationError('Goal title must be between 1 and 255 characters.')
-            goal.title = title
-        if 'completed' in payload:
-            if not isinstance(payload['completed'], bool):
-                raise ValidationError('Completed must be true or false.')
-            goal.completed = payload['completed']
-            goal.completed_at = timezone.now() if goal.completed else None
-        goal.save()
-        return JsonResponse({'success': True, 'data': {'goal': _serialize_personal_goal(goal)}})
-    except AppError as exc:
-        return error_response(exc)
-
-
 def _require_company_account(user):
-    """Reject individual/staff accounts from organization-wide admin actions."""
+    """Reject staff accounts from organization-wide admin actions."""
     if _is_individual_account(user):
         raise PermissionDeniedError('Only company administrators can perform this action.')
 
@@ -220,7 +114,18 @@ def announcements_view(request):
         user, organization = _organization_for(request)
         if request.method == 'GET':
             records = Announcement.objects.filter(organization=organization)
-            return JsonResponse([_serialize_announcement(record) for record in records], safe=False)
+            search = (request.GET.get('search') or '').strip()
+            if search:
+                records = records.filter(
+                    Q(title__icontains=search)
+                    | Q(content__icontains=search)
+                    | Q(priority__icontains=search)
+                    | Q(author__icontains=search)
+                )
+            return JsonResponse({
+                'success': True,
+                'data': paginated_data(request, records, _serialize_announcement, key='announcements'),
+            })
 
         payload = _announcement_payload(parse_json_body(request))
         author = getattr(getattr(user, 'profile', None), 'full_name', '') or user.get_full_name() or user.email
@@ -296,9 +201,17 @@ def _month_delta_label(current_value, previous_value, suffix='from last month'):
 
 
 def _next_occurrence(occasion, today):
-    candidate = occasion.replace(year=today.year)
+    """Next anniversary of ``occasion`` on or after ``today`` (Feb 29 → Feb 28)."""
+
+    def on_year(year):
+        try:
+            return occasion.replace(year=year)
+        except ValueError:
+            return date(year, 2, 28)
+
+    candidate = on_year(today.year)
     if candidate < today:
-        candidate = candidate.replace(year=today.year + 1)
+        candidate = on_year(today.year + 1)
     return candidate
 
 
@@ -409,7 +322,9 @@ def _dashboard_overview_payload(user, organization):
         for record in attendance_today
         if record.status in {AttendanceRecord.STATUS_PRESENT, AttendanceRecord.STATUS_LATE, AttendanceRecord.STATUS_EARLY_DEPARTURE}
     )
-    remote_today = sum(1 for record in attendance_today if record.location_id is None)
+    remote_today = sum(
+        1 for record in attendance_today if record.work_mode == AttendanceRecord.WORK_MODE_REMOTE
+    )
     on_leave_count = len({leave.employee_id for leave in current_leaves})
     absent_today = max(employee_count - present_today - on_leave_count, 0)
 
@@ -431,8 +346,9 @@ def _dashboard_overview_payload(user, organization):
     )
 
     active_ids = {employee.id for employee in active_employees}
+    month_start_at = datetime.combine(month_start, time.min, tzinfo=timezone.get_current_timezone())
     previous_month_total = _in_organization(Employee.objects.all(), organization).filter(
-        created_at__lt=month_start,
+        created_at__lt=month_start_at,
     ).exclude(status=Employee.STATUS_TERMINATED).count()
     total_direction, total_note = _month_delta_label(employee_count, previous_month_total)
 
@@ -691,7 +607,7 @@ def _dashboard_stats_payload(organization):
             organization=organization,
             date=today,
             employee_id__in=employee_ids,
-        ).values_list('status', 'location_id')
+        ).values_list('status', 'work_mode')
     )
     attended_statuses = {
         AttendanceRecord.STATUS_PRESENT,
@@ -700,7 +616,9 @@ def _dashboard_stats_payload(organization):
     }
     present_today = sum(1 for status, _ in attendance_today if status in attended_statuses)
     late_today = sum(1 for status, _ in attendance_today if status == AttendanceRecord.STATUS_LATE)
-    remote_today = sum(1 for _, location_id in attendance_today if location_id is None)
+    remote_today = sum(
+        1 for _, work_mode in attendance_today if work_mode == AttendanceRecord.WORK_MODE_REMOTE
+    )
 
     on_leave = (
         LeaveRequest.objects.filter(
@@ -900,8 +818,19 @@ def payroll_records_view(request):
             # Staff may only ever see their own payslip, never the rest of the org's.
             employee = get_my_employee(user)
             queryset = queryset.filter(employee=employee) if employee is not None else queryset.none()
-        records = list(queryset)
-        return JsonResponse({'success': True, 'data': {'records': [_serialize_payroll_record(record) for record in records]}})
+        search = (request.GET.get('search') or '').strip()
+        if search:
+            queryset = queryset.filter(
+                Q(employee__first_name__icontains=search)
+                | Q(employee__last_name__icontains=search)
+                | Q(employee__employee_id__icontains=search)
+                | Q(department__icontains=search)
+                | Q(status__icontains=search)
+            )
+        return JsonResponse({
+            'success': True,
+            'data': paginated_data(request, queryset, _serialize_payroll_record, key='records'),
+        })
     except AppError as exc:
         return error_response(exc)
 
@@ -977,13 +906,24 @@ def _module_record(module, organization, record_pk):
         raise NotFoundError('Record not found.') from exc
 
 
-def _list_response(module, organization):
+def _list_response(request, module, organization):
     config = PLATFORM_MODULE_CONFIG[module]
-    records = PlatformRecord.objects.filter(module=module, organization=organization)
+    queryset = PlatformRecord.objects.filter(module=module, organization=organization)
+    search = (request.GET.get('search') or '').strip().lower()
+    if search:
+        records = [record for record in queryset if _platform_record_matches(record, search)]
+        data = paginated_data(request, records, _serialize_platform_record, key=config['list_key'])
+    else:
+        data = paginated_data(request, queryset, _serialize_platform_record, key=config['list_key'])
     return JsonResponse({
         'success': True,
-        'data': {config['list_key']: [_serialize_platform_record(record) for record in records]},
+        'data': data,
     })
+
+
+def _platform_record_matches(record, search):
+    blob = json.dumps(record.payload or {}, default=str).lower()
+    return search in blob or search in str(record.id).lower()
 
 
 def _create_response(module, organization, payload):
@@ -1016,7 +956,7 @@ def _collection_view(request, module):
     user, organization = _organization_for(request)
     _require_company_account(user)
     if request.method == 'GET':
-        return _list_response(module, organization)
+        return _list_response(request, module, organization)
     return _create_response(module, organization, parse_json_body(request))
 
 
@@ -1262,18 +1202,25 @@ def notification_inbox_view(request):
     try:
         organization, employee = _recipient_for(request)
         if employee is None:
-            return JsonResponse({'success': True, 'data': {'notifications': [], 'unreadCount': 0}})
+            return JsonResponse({
+                'success': True,
+                'data': paginated_data(request, Notification.objects.none(), _serialize_notification, key='notifications') | {
+                    'unreadCount': 0,
+                },
+            })
 
-        notifications = list(
-            Notification.objects.filter(organization=organization, recipient=employee)
-        )
-        unread_count = sum(1 for item in notifications if item.read_at is None)
+        notifications = Notification.objects.filter(organization=organization, recipient=employee)
+        unread_count = notifications.filter(read_at__isnull=True).count()
+        search = (request.GET.get('search') or '').strip()
+        if search:
+            notifications = notifications.filter(
+                Q(title__icontains=search) | Q(body__icontains=search) | Q(category__icontains=search)
+            )
+        data = paginated_data(request, notifications, _serialize_notification, key='notifications')
+        data['unreadCount'] = unread_count
         return JsonResponse({
             'success': True,
-            'data': {
-                'notifications': [_serialize_notification(item) for item in notifications],
-                'unreadCount': unread_count,
-            },
+            'data': data,
         })
     except AppError as exc:
         return error_response(exc)

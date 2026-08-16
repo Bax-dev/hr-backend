@@ -7,9 +7,10 @@ from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.utils.errors import AppError
 from hr_app_backend.utils.idempotency import idempotent
+from hr_app_backend.utils.pagination import paginated_data
 from hr_app_backend.utils.throttles import throttle_view
 
-from ..serializers import serialize_file, serialize_share
+from ..serializers import serialize_file, serialize_folder, serialize_share
 from ..services import (
     create_share,
     delete_file,
@@ -21,6 +22,7 @@ from ..services import (
     resolve_download_url,
     resolve_public_download_url,
     revoke_share,
+    search_library,
     update_file,
 )
 from .helpers import require_user
@@ -45,6 +47,29 @@ def files_presign_view(request):
 
 
 @csrf_exempt
+@require_http_methods(['GET'])
+@throttle_view('file_management:search', '180/min')
+def files_search_view(request):
+    try:
+        user = require_user(request)
+        result = search_library(user, request.GET.get('q') or request.GET.get('search') or '')
+        folders = [
+            {**serialize_folder(folder, user), 'path': result['folder_paths'].get(folder.id, [])}
+            for folder in result['folders']
+        ]
+        files = [
+            {
+                **serialize_file(file_asset, user),
+                'path': result['file_paths'].get(file_asset.folder_id, []) if file_asset.folder_id else [],
+            }
+            for file_asset in result['files']
+        ]
+        return JsonResponse({'success': True, 'data': {'folders': folders, 'files': files}})
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
 @require_http_methods(['GET', 'POST'])
 @throttle_view('file_management:write', '120/min')
 @idempotent('file_management:register-file')
@@ -55,7 +80,15 @@ def files_view(request):
             folder_id = request.GET.get('folder_id') or request.GET.get('folderId')
             search = request.GET.get('search')
             files = list_files(user, folder_id, search)
-            return JsonResponse([serialize_file(f, user) for f in files], safe=False)
+            return JsonResponse({
+                'success': True,
+                'data': paginated_data(
+                    request,
+                    files,
+                    lambda file_asset: serialize_file(file_asset, user),
+                    key='files',
+                ),
+            })
 
         file_asset = register_file(user, parse_json_body(request), request=request)
         return JsonResponse(serialize_file(file_asset, user), status=201)

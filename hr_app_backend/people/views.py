@@ -57,6 +57,7 @@ from hr_app_backend.employees.services import (
 )
 from hr_app_backend.employees.views.helpers import require_user
 from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.pagination import paginated_data
 
 
 @require_http_methods(['GET'])
@@ -83,15 +84,18 @@ def people_departments_view(request):
     try:
         user = require_user(request)
         if request.method == 'GET':
-            departments, counts = list_departments(user)
+            departments, counts = list_departments(user, search=request.GET.get('search'))
             return JsonResponse({
                 'success': True,
-                'data': {
-                    'departments': [
-                        serialize_department(department, counts.get(department.name.strip().lower(), 0))
-                        for department in departments
-                    ]
-                },
+                'data': paginated_data(
+                    request,
+                    departments,
+                    lambda department: serialize_department(
+                        department,
+                        counts.get(department.name.strip().lower(), 0),
+                    ),
+                    key='departments',
+                ),
             })
 
         department = create_department(user, department_payload(parse_json_body(request)))
@@ -132,7 +136,12 @@ def teams_view(request):
             )
             return JsonResponse({
                 'success': True,
-                'data': {'teams': [serialize_team(team, getattr(team, 'member_count', 0)) for team in teams]},
+                'data': paginated_data(
+                    request,
+                    teams,
+                    lambda team: serialize_team(team, getattr(team, 'member_count', 0)),
+                    key='teams',
+                ),
             })
 
         team = create_team(user, team_payload(parse_json_body(request)))
@@ -176,12 +185,12 @@ def designations_view(request):
             designations = list_designations(user, search=request.GET.get('search'))
             return JsonResponse({
                 'success': True,
-                'data': {
-                    'designations': [
-                        serialize_designation(designation, getattr(designation, 'employee_count', 0))
-                        for designation in designations
-                    ]
-                },
+                'data': paginated_data(
+                    request,
+                    designations,
+                    lambda designation: serialize_designation(designation, getattr(designation, 'employee_count', 0)),
+                    key='designations',
+                ),
             })
 
         designation = create_designation(user, designation_payload(parse_json_body(request)))

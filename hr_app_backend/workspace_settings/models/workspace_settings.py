@@ -36,5 +36,9 @@ class WorkspaceSettings(TimeStampedModel):
     enforce_single_session = models.BooleanField(default=False)
     allowed_email_domain = models.CharField(max_length=255, blank=True)
 
+    # Workspace AI. When false, the HR Copilot button is hidden and the API
+    # refuses assistant requests for everyone in this organization.
+    copilot_enabled = models.BooleanField(default=True)
+
     def __str__(self):
         return f'Settings for {self.organization.name}'

@@ -30,6 +30,12 @@ class Employee(TimeStampedModel):
         (STATUS_ON_LEAVE, 'On Leave'),
         (STATUS_TERMINATED, 'Terminated'),
     ]
+    WORK_MODE_ONSITE = 'onsite'
+    WORK_MODE_REMOTE = 'remote'
+    WORK_MODES = [
+        (WORK_MODE_ONSITE, 'On-site'),
+        (WORK_MODE_REMOTE, 'Remote'),
+    ]
 
     organization = models.ForeignKey(Organization, on_delete=models.CASCADE, related_name='employees')
     employee_id = models.CharField(max_length=32)
@@ -61,6 +67,7 @@ class Employee(TimeStampedModel):
         related_name='employees',
     )
     status = models.CharField(max_length=20, choices=STATUSES, default=STATUS_ACTIVE)
+    work_mode = models.CharField(max_length=20, choices=WORK_MODES, default=WORK_MODE_ONSITE)
     gender = models.CharField(max_length=32, blank=True)
     country = models.CharField(max_length=64, blank=True)
     hire_date = models.DateField(null=True, blank=True)
