@@ -4,8 +4,8 @@ from hr_app_backend.utils import get_bool, get_env, get_int
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': get_env('DB_NAME', 'hr_app_db'),
-        'USER': get_env('DB_USER', 'postgres'),
+        'NAME': get_env('DB_NAME', 'workiva_dev'),
+        'USER': get_env('DB_USER', 'mac'),
         'PASSWORD': get_env('DB_PASSWORD', ''),
         'HOST': get_env('DB_HOST', '127.0.0.1'),
         'PORT': get_int('DB_PORT', 5432),

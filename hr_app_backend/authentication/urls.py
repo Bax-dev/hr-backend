@@ -14,6 +14,16 @@ from .views import (
     verify_signup_otp_view,
     accept_employee_invite_view,
     employee_invite_view,
+    login_history_view,
+    mfa_disable_view,
+    mfa_enable_view,
+    mfa_recovery_codes_view,
+    mfa_setup_view,
+    mfa_status_view,
+    mfa_verify_view,
+    revoke_other_sessions_view,
+    session_detail_view,
+    sessions_view,
 )
 
 urlpatterns = [
@@ -30,4 +40,16 @@ urlpatterns = [
     path('me/', me_view, name='me'),
     path('account/', delete_account_view, name='delete-account'),
     path('logout/', logout_view, name='logout'),
+    # Signed-in devices and sign-in history
+    path('sessions/', sessions_view, name='sessions'),
+    path('sessions/revoke-others/', revoke_other_sessions_view, name='sessions-revoke-others'),
+    path('sessions/<uuid:session_id>/', session_detail_view, name='session-detail'),
+    path('login-history/', login_history_view, name='login-history'),
+    # Two-step verification (authenticator app + recovery codes)
+    path('mfa/', mfa_status_view, name='mfa'),
+    path('mfa/setup/', mfa_setup_view, name='mfa-setup'),
+    path('mfa/enable/', mfa_enable_view, name='mfa-enable'),
+    path('mfa/disable/', mfa_disable_view, name='mfa-disable'),
+    path('mfa/recovery-codes/', mfa_recovery_codes_view, name='mfa-recovery-codes'),
+    path('mfa/verify/', mfa_verify_view, name='mfa-verify'),
 ]

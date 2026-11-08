@@ -6,12 +6,16 @@ from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from hr_app_backend.utils.env import get_env
-from hr_app_backend.utils.errors import AppError, ValidationError
+from hr_app_backend.utils.errors import AppError, ExternalServiceError, ValidationError
 
 from .crypto import decrypt_secret
 
 SOURCE_ORGANIZATION = 'organization'
 SOURCE_PLATFORM = 'platform'
+STORAGE_UNAVAILABLE_MESSAGE = (
+    'File storage is temporarily unavailable. Please try again shortly, '
+    'or ask your administrator to check the storage settings.'
+)
 
 
 def platform_s3_client():
@@ -60,20 +64,25 @@ def resolve_storage(organization):
     belong to ``organization`` — its own bucket when configured and active,
     otherwise the platform's shared bucket."""
     config = org_s3_config(organization)
-    if config is not None and config.is_active and config.bucket_name and config.access_key_id:
-        return org_s3_client(config), config.bucket_name, SOURCE_ORGANIZATION
-    return platform_s3_client(), platform_bucket_name(), SOURCE_PLATFORM
+    try:
+        if config is not None and config.is_active and config.bucket_name and config.access_key_id:
+            return org_s3_client(config), config.bucket_name, SOURCE_ORGANIZATION
+        return platform_s3_client(), platform_bucket_name(), SOURCE_PLATFORM
+    except BotoCoreError as exc:
+        # Raised while building the client, e.g. a credential provider that
+        # needs an extra dependency. Surface it as a clean API error.
+        raise ExternalServiceError(STORAGE_UNAVAILABLE_MESSAGE) from exc
 
 
 def resolve_storage_if_configured(organization):
     """Like :func:`resolve_storage`, but returns ``(None, None, None)`` when
     neither an org bucket nor the platform bucket is available."""
     config = org_s3_config(organization)
-    if config is not None and config.is_active and config.bucket_name and config.access_key_id:
-        return org_s3_client(config), config.bucket_name, SOURCE_ORGANIZATION
     try:
+        if config is not None and config.is_active and config.bucket_name and config.access_key_id:
+            return org_s3_client(config), config.bucket_name, SOURCE_ORGANIZATION
         return platform_s3_client(), platform_bucket_name(), SOURCE_PLATFORM
-    except AppError:
+    except (AppError, BotoCoreError):
         return None, None, None
 
 

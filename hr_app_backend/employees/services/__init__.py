@@ -5,6 +5,7 @@ from .employees import (
     get_my_employee,
     list_employees,
     my_employee_profile,
+    set_employee_hr_admin,
     update_employee,
     update_my_employee,
 )
@@ -38,6 +39,7 @@ from .people import (
 )
 
 __all__ = [
+    'set_employee_hr_admin',
     'build_organization_chart',
     'build_people_summary',
     'create_custom_field',

@@ -40,4 +40,5 @@ def serialize_employee(employee):
             else None
         ),
         'has_portal_access': profile is not None,
+        'is_hr_admin': bool(profile is not None and profile.account_type == 'company'),
     }

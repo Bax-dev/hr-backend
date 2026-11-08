@@ -14,6 +14,7 @@ from ..services import (
     verify_subscription_payment,
 )
 from hr_app_backend.authentication.views.helpers import set_session_cookie
+from ..services.billing import public_provider_response
 
 from .helpers import error_response, load_json, require_authenticated_user
 
@@ -88,7 +89,9 @@ def verify_paid_signup_checkout_view(request):
         if not reference:
             from hr_app_backend.utils.errors import ValidationError
             raise ValidationError('Reference is required.')
-        subscription, session, provider_response = verify_paid_signup_checkout(reference)
+        subscription, session, provider_response = verify_paid_signup_checkout(reference, request)
+        # A session payload carries the token for the httpOnly cookie; an MFA challenge
+        # (not reachable for a brand-new signup, but handled anyway) carries none.
         session = dict(session)
         token = session.pop('token', None)
         response = JsonResponse({
@@ -97,7 +100,7 @@ def verify_paid_signup_checkout_view(request):
                 'subscription': serialize_subscription(subscription),
                 'payment_verified': True,
                 'session': session,
-                'provider_response': provider_response,
+                'provider_response': public_provider_response(provider_response),
             },
         })
         if token:

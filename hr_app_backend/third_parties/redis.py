@@ -14,7 +14,7 @@ def get_redis_url(default=DEFAULT_REDIS_URL):
 def build_django_cache_config(url=None, key_prefix="hr_app_backend"):
     location = url or get_redis_url()
     return {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "BACKEND": "hr_app_backend.third_parties.fail_open_cache.FailOpenRedisCache",
         "LOCATION": location,
         "KEY_PREFIX": key_prefix,
         "TIMEOUT": 300,

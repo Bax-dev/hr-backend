@@ -3,13 +3,14 @@ from decimal import Decimal
 from uuid import UUID
 import json
 
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.http import JsonResponse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
-from hr_app_backend.authentication.models import UserProfile
+from hr_app_backend.authentication.models import Organization, UserProfile
 from hr_app_backend.authentication.serializers import parse_json_body
 from hr_app_backend.authentication.views.helpers import error_response
 from hr_app_backend.attendance.models import AttendanceRecord
@@ -127,6 +128,9 @@ def announcements_view(request):
                 'data': paginated_data(request, records, _serialize_announcement, key='announcements'),
             })
 
+        # Posting reaches the whole organization, so it is an admin action;
+        # staff (individual accounts linked to the org) can only read.
+        _require_company_account(user)
         payload = _announcement_payload(parse_json_body(request))
         author = getattr(getattr(user, 'profile', None), 'full_name', '') or user.get_full_name() or user.email
         announcement = Announcement.objects.create(
@@ -858,26 +862,33 @@ def payroll_run_view(request):
         user, organization = _organization_for(request)
         _require_company_account(user)
         month = _month_value(parse_json_body(request).get('month'))
-        employees = list(
-            Employee.objects.filter(organization=organization).exclude(status=Employee.STATUS_TERMINATED)
-        )
-        if not employees:
-            raise ValidationError('No employees are available for payroll.')
+        # One transaction, serialized per organization: two concurrent runs (a
+        # double-click with different idempotency keys, two admins) used to
+        # race between reading existing records and inserting, and the loser
+        # hit the unique constraint as a 500. Now the second run waits for the
+        # first, then sees its records and creates nothing.
+        with transaction.atomic():
+            Organization.objects.select_for_update().filter(pk=organization.pk).first()
+            employees = list(
+                Employee.objects.filter(organization=organization).exclude(status=Employee.STATUS_TERMINATED)
+            )
+            if not employees:
+                raise ValidationError('No employees are available for payroll.')
 
-        existing_ids = set(
-            PayrollRecord.objects.filter(organization=organization, month=month).values_list('employee_id', flat=True)
-        )
-        for employee in employees:
-            if employee.id not in existing_ids:
-                _build_payroll_record(organization, employee, month)
-                # Let the employee know their payslip is ready to view/download.
-                create_notification(
-                    organization=organization,
-                    recipient=employee,
-                    title=f'Payslip ready for {month}',
-                    body=f'Your payslip for {month} has been issued and is now available in the Payslips section.',
-                    category=Notification.CATEGORY_PAYROLL,
-                )
+            existing_ids = set(
+                PayrollRecord.objects.filter(organization=organization, month=month).values_list('employee_id', flat=True)
+            )
+            for employee in employees:
+                if employee.id not in existing_ids:
+                    _build_payroll_record(organization, employee, month)
+                    # Let the employee know their payslip is ready to view/download.
+                    create_notification(
+                        organization=organization,
+                        recipient=employee,
+                        title=f'Payslip ready for {month}',
+                        body=f'Your payslip for {month} has been issued and is now available in the Payslips section.',
+                        category=Notification.CATEGORY_PAYROLL,
+                    )
 
         records = list(
             PayrollRecord.objects.filter(organization=organization, month=month).select_related('employee')

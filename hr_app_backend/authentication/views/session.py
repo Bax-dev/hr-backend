@@ -9,8 +9,17 @@ from hr_app_backend.audit_logs.services import record_audit_event_safely
 
 from ..serializers import serialize_user
 from ..serializers import change_password_payload, delete_account_payload, login_payload
-from ..services import auth_response, change_password, delete_account, destroy_session, get_user_by_token, login_user
+from ..services import change_password, delete_account, destroy_session, get_user_by_token, login
 from .helpers import clear_session_cookie, error_response, load_json, session_json_response, token_from_request
+
+
+def record_sign_in(request, user):
+    organization = getattr(getattr(user, 'profile', None), 'organization', None)
+    if organization:
+        record_audit_event_safely(
+            organization=organization, actor=user, request=request, action='auth.login',
+            category='authentication', description=f'{user.email} signed in.', resource_type='user', resource_id=user.id,
+        )
 
 
 @csrf_exempt
@@ -22,15 +31,13 @@ def login_view(request):
         # The per-IP limit above does not stop credential stuffing spread across
         # many IPs, so also cap attempts against a single account.
         throttle(request, scope='auth:login:account', rate='10/min', ident=payload['email'].lower())
-        user = login_user(payload)
-        profile = getattr(user, 'profile', None)
-        organization = getattr(profile, 'organization', None)
-        if organization:
-            record_audit_event_safely(
-                organization=organization, actor=user, request=request, action='auth.login',
-                category='authentication', description=f'{user.email} signed in.', resource_type='user', resource_id=user.id,
-            )
-        return session_json_response(auth_response(user))
+        user, result = login(request, payload)
+        # With two-step verification on, ``result`` is a challenge ({mfa_required: true,
+        # mfa_token, ...}) and no cookie is set; the sign-in is audited once
+        # auth/mfa/verify/ succeeds.
+        if not result.get('mfa_required'):
+            record_sign_in(request, user)
+        return session_json_response(result)
     except AppError as exc:
         return error_response(exc)
 
@@ -137,6 +144,12 @@ def change_password_view(request):
                 action='auth.password_changed', category='security',
                 description=f'{updated_user.email} changed their password.', resource_type='user', resource_id=updated_user.id,
             )
-        return JsonResponse({'success': True, 'data': {'user': serialize_user(updated_user)}})
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'user': serialize_user(updated_user),
+                'sessions_revoked': getattr(updated_user, 'sessions_revoked', 0),
+            },
+        })
     except AppError as exc:
         return error_response(exc)
