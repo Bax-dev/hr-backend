@@ -59,6 +59,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'hr_app_backend.middleware.DatabaseConnectionCleanupMiddleware',
     'hr_app_backend.middleware.RequestIDMiddleware',
+    'hr_app_backend.middleware.ApiExceptionMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',

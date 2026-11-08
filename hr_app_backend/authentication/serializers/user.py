@@ -11,6 +11,15 @@ def serialize_organization(organization):
     }
 
 
+def _workspace_role(profile, employee):
+    """owner (signed up the company), hr_admin (an employee granted admin access) or employee."""
+    if profile is None or not getattr(profile, 'account_type', ''):
+        return ''
+    if profile.account_type == 'company':
+        return 'hr_admin' if employee is not None else 'owner'
+    return 'employee'
+
+
 def serialize_user(user):
     profile = getattr(user, 'profile', None)
     organization = getattr(profile, 'organization', None) if profile else None
@@ -28,6 +37,7 @@ def serialize_user(user):
         'last_name': user.last_name,
         'full_name': getattr(profile, 'full_name', '') or user.get_full_name(),
         'account_type': getattr(profile, 'account_type', ''),
+        'workspace_role': _workspace_role(profile, employee),
         'phone': getattr(profile, 'phone', ''),
         'invite_code': getattr(profile, 'invite_code', ''),
         'must_change_password': getattr(profile, 'must_change_password', False),

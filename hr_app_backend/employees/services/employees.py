@@ -9,6 +9,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from hr_app_backend.audit_logs.services import record_audit_event_safely
 from hr_app_backend.authentication.models import UserProfile
 from hr_app_backend.authentication.services.employee_invites import create_employee_invite_token
 from hr_app_backend.authentication.services.sessions import destroy_all_sessions_for_user
@@ -304,6 +305,8 @@ def get_my_employee(user):
     profile = getattr(user, 'profile', None)
     employee = getattr(profile, 'employee', None) if profile else None
     if employee is None:
+        employee = _owner_employee_record(user, profile)
+    if employee is None:
         return None
 
     return Employee.objects.select_related(
@@ -313,6 +316,19 @@ def get_my_employee(user):
         'manager_employee',
         'user_profile',
     ).get(pk=employee.pk)
+
+
+def _owner_employee_record(user, profile):
+    """A workspace owner can add themselves to the directory without a portal
+    invite (they already have an account), so match that record by email, the
+    same way attendance resolves it."""
+    if profile is None or profile.account_type != UserProfile.ACCOUNT_TYPE_COMPANY or not profile.organization_id:
+        return None
+    return (
+        Employee.objects.filter(organization_id=profile.organization_id, email__iexact=user.email)
+        .exclude(status=Employee.STATUS_TERMINATED)
+        .first()
+    )
 
 
 SELF_EDIT_QUOTA_FIELDS = frozenset({'email', 'first_name', 'last_name', 'phone', 'gender', 'country', 'date_of_birth'})
@@ -546,3 +562,74 @@ def delete_employee(user, employee_pk):
     employee.email = f'deleted-{employee.pk}-{employee.email}'[:254]
     employee.employee_id = f'DEL-{employee.pk}'[:32]
     employee.save(update_fields=['is_deleted', 'deleted_at', 'email', 'employee_id', 'updated_at'])
+
+
+FREE_PLAN_ADMIN_LIMIT = 1
+
+
+def _admin_limit(organization):
+    """Free workspaces include a single HR/Admin seat; paid plans are unlimited."""
+    from hr_app_backend.billing.models import Subscription
+
+    subscription = (
+        Subscription.objects.filter(organization=organization, status=Subscription.STATUS_ACTIVE)
+        .order_by('-created_at')
+        .first()
+    )
+    if subscription is None or subscription.plan == Subscription.PLAN_FREE_TRIAL:
+        return FREE_PLAN_ADMIN_LIMIT
+    return None
+
+
+@transaction.atomic
+def set_employee_hr_admin(user, employee_pk, is_hr_admin, request=None):
+    """Grant or revoke HR admin access for an employee with portal access.
+
+    HR admins are company accounts, so every admin-only check in the API (and
+    the admin routes in the web app) applies to them unchanged.
+    """
+    employee = get_employee(user, employee_pk)
+    organization = employee.organization
+    target = UserProfile.objects.select_for_update().filter(employee=employee).select_related('user').first()
+    if target is None:
+        raise ValidationError(
+            'This employee has no portal account yet. Send them a login setup invite first.'
+        )
+    if target.user_id == user.id:
+        raise PermissionDeniedError('You cannot change your own HR admin access.')
+
+    is_hr_admin = _clean_bool(is_hr_admin)
+    currently_admin = target.account_type == UserProfile.ACCOUNT_TYPE_COMPANY
+    if is_hr_admin == currently_admin:
+        return employee
+
+    if is_hr_admin:
+        limit = _admin_limit(organization)
+        if limit is not None:
+            admins = UserProfile.objects.filter(
+                organization=organization, account_type=UserProfile.ACCOUNT_TYPE_COMPANY
+            ).count()
+            if admins >= limit:
+                raise ValidationError(
+                    'Your plan includes 1 HR/Admin. Upgrade to Essential or Premium to add more HR admins.',
+                    code='PLAN_ADMIN_LIMIT',
+                )
+
+    target.account_type = UserProfile.ACCOUNT_TYPE_COMPANY if is_hr_admin else UserProfile.ACCOUNT_TYPE_INDIVIDUAL
+    target.save(update_fields=['account_type', 'updated_at'])
+    # Sessions cache the old role on the client; sign the person out so their
+    # next login picks up the new access level.
+    destroy_all_sessions_for_user(target.user_id)
+
+    name = _display_employee_name(employee)
+    record_audit_event_safely(
+        organization=organization,
+        actor=user,
+        action='employees.hr_admin_granted' if is_hr_admin else 'employees.hr_admin_revoked',
+        category='employees',
+        description=f'{"Granted" if is_hr_admin else "Revoked"} HR admin access for {name}.',
+        request=request,
+        resource_type='employee',
+        resource_id=employee.pk,
+    )
+    return Employee.objects.select_related('user_profile', 'designation', 'team', 'manager_employee').get(pk=employee.pk)

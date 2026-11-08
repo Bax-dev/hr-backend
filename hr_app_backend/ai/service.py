@@ -100,9 +100,11 @@ def _extract_text(message):
 def ask_assistant(*, messages, page, user, client=None):
     bedrock_messages = _to_bedrock_messages(messages)
     actions = []
-    runtime = client or _client()
 
     try:
+        # Client creation sits inside the try: a broken credential chain raises
+        # here (e.g. botocore's MissingDependencyException), not on converse().
+        runtime = client or _client()
         for _ in range(MAX_TOOL_ROUNDS + 1):
             response = runtime.converse(
                 modelId=settings.BEDROCK_MODEL_ID,

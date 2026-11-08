@@ -21,6 +21,7 @@ from ..services import (
     get_my_employee,
     list_employees,
     my_employee_profile,
+    set_employee_hr_admin,
     update_employee,
     update_my_employee,
 )
@@ -90,6 +91,20 @@ def employee_detail_view(request, employee_pk):
 
         payload = employee_payload(parse_json_body(request), partial=True)
         employee = update_employee(user, employee_pk, payload)
+        return JsonResponse({'success': True, 'data': {'employee': serialize_employee(employee)}})
+    except AppError as exc:
+        return error_response(exc)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+@throttle_view('employees:write', '120/min')
+def employee_hr_admin_view(request, employee_pk):
+    """Grant (``{"is_hr_admin": true}``) or revoke HR admin access for an employee."""
+    try:
+        user = require_user(request)
+        payload = parse_json_body(request)
+        employee = set_employee_hr_admin(user, employee_pk, payload.get('is_hr_admin'), request=request)
         return JsonResponse({'success': True, 'data': {'employee': serialize_employee(employee)}})
     except AppError as exc:
         return error_response(exc)
