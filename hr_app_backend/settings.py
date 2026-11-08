@@ -1,3 +1,4 @@
+from django.core.exceptions import ImproperlyConfigured
 from pathlib import Path
 
 from hr_app_backend.config import DATABASES, INSTALLED_APPS
@@ -103,6 +104,16 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 
+# Argon2 for new and re-saved passwords. The others stay so existing hashes keep
+# working; Django upgrades each one to Argon2 the next time that user signs in.
+PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.Argon2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    'django.contrib.auth.hashers.PBKDF2SHA1PasswordHasher',
+    'django.contrib.auth.hashers.ScryptPasswordHasher',
+]
+
+
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
@@ -136,6 +147,15 @@ EMAIL_USE_TLS = get_bool('DJANGO_EMAIL_USE_TLS', default=True)
 EMAIL_USE_SSL = get_bool('DJANGO_EMAIL_USE_SSL', default=False)
 DEFAULT_FROM_EMAIL = get_env('DJANGO_DEFAULT_FROM_EMAIL', 'noreply@hrapp.local')
 
+# How emails are delivered: 'resend' (default) or 'console' (print to the server log,
+# for local testing of OTPs and invite links). Console mode is refused unless DEBUG is on,
+# since its output contains one-time codes.
+EMAIL_DELIVERY = (get_env('EMAIL_DELIVERY', 'resend') or 'resend').strip().lower()
+if EMAIL_DELIVERY not in {'resend', 'console'}:
+    raise ImproperlyConfigured("EMAIL_DELIVERY must be 'resend' or 'console'.")
+if EMAIL_DELIVERY == 'console' and not DEBUG:
+    raise ImproperlyConfigured('EMAIL_DELIVERY=console is for local development only (requires DJANGO_DEBUG=True).')
+
 PAYSTACK_SECRET_KEY = get_env('PAYSTACK_SECRET_KEY', '')
 PAYSTACK_PUBLIC_KEY = get_env('PAYSTACK_PUBLIC_KEY', '')
 PAYSTACK_BASE_URL = get_env('PAYSTACK_BASE_URL', 'https://api.paystack.co')
@@ -155,6 +175,34 @@ BEDROCK_MAX_TOKENS = get_int('BEDROCK_MAX_TOKENS', 1200)
 FILE_STORAGE_ENCRYPTION_KEY = get_env('FILE_STORAGE_ENCRYPTION_KEY', '')
 
 CSRF_TRUSTED_ORIGINS = get_list('DJANGO_CSRF_TRUSTED_ORIGINS', default=[])
+
+# Logs go to stdout tagged with the request id; obvious secrets are masked.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'request_id': {'()': 'hr_app_backend.middleware.request_id.RequestIdLogFilter'},
+        'redact_secrets': {'()': 'hr_app_backend.middleware.request_id.RedactSecretsFilter'},
+    },
+    'formatters': {
+        'plain': {'format': '%(message)s'},
+        'default': {'format': '%(asctime)s %(levelname)s [%(request_id)s] %(name)s: %(message)s'},
+    },
+    'handlers': {
+        'dev_email': {'class': 'logging.StreamHandler', 'formatter': 'plain'},
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'default',
+            'filters': ['request_id', 'redact_secrets'],
+        },
+    },
+    'root': {'handlers': ['console'], 'level': get_env('DJANGO_LOG_LEVEL', 'INFO')},
+    'loggers': {
+        'django': {'handlers': ['console'], 'level': get_env('DJANGO_LOG_LEVEL', 'INFO'), 'propagate': False},
+        # EMAIL_DELIVERY=console output (DEBUG-only): deliberately not redacted so codes and links are readable.
+        'hr_app_backend.dev_email': {'handlers': ['dev_email'], 'level': 'INFO', 'propagate': False},
+    },
+}
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

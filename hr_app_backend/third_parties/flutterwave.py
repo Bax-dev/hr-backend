@@ -16,7 +16,7 @@ class FlutterwaveError(AppError):
 
 
 class FlutterwaveClient:
-    def __init__(self, secret_key=None, base_url=FLUTTERWAVE_BASE_URL, timeout=30):
+    def __init__(self, secret_key=None, base_url=FLUTTERWAVE_BASE_URL, timeout=15):
         self.secret_key = secret_key or get_env('FLUTTERWAVE_SECRET_KEY')
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
@@ -70,11 +70,16 @@ class FlutterwaveClient:
                 return json.loads(response.read().decode('utf-8'))
         except HTTPError as exc:
             details = exc.read().decode('utf-8', errors='ignore')
-            logger.warning('Flutterwave request to %s failed with status %s: %s', path, exc.code, details)
-            raise FlutterwaveError('The payment provider could not process this request. Please try again.') from exc
-        except URLError as exc:
-            logger.warning('Unable to reach Flutterwave for %s: %s', path, exc.reason)
-            raise FlutterwaveError('The payment provider is currently unreachable. Please try again.') from exc
+            # Provider bodies can carry customer/account details: log them, but
+            # only ever return a generic message to the API client.
+            logger.error('Flutterwave %s %s failed with status %s: %s', method, path.split('?')[0], exc.code, details[:2000])
+            raise FlutterwaveError('The payment provider rejected the request. Please try again.') from exc
+        except (URLError, TimeoutError) as exc:
+            logger.error('Unable to reach Flutterwave for %s %s: %s', method, path.split('?')[0], exc)
+            raise FlutterwaveError('The payment provider is unavailable right now. Please try again shortly.') from exc
+        except ValueError as exc:
+            logger.error('Flutterwave returned a non-JSON response for %s %s', method, path.split('?')[0])
+            raise FlutterwaveError('The payment provider returned an unexpected response.') from exc
 
 
 

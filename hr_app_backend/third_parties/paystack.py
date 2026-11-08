@@ -17,7 +17,7 @@ class PaystackError(AppError):
 
 
 class PaystackClient:
-    def __init__(self, secret_key=None, base_url=PAYSTACK_BASE_URL, timeout=30):
+    def __init__(self, secret_key=None, base_url=PAYSTACK_BASE_URL, timeout=15):
         self.secret_key = secret_key or get_env("PAYSTACK_SECRET_KEY")
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -85,11 +85,16 @@ class PaystackClient:
                 return json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             details = exc.read().decode("utf-8", errors="ignore")
-            logger.warning("Paystack request to %s failed with status %s: %s", path, exc.code, details)
-            raise PaystackError("The payment provider could not process this request. Please try again.") from exc
-        except URLError as exc:
-            logger.warning("Unable to reach Paystack for %s: %s", path, exc.reason)
-            raise PaystackError("The payment provider is currently unreachable. Please try again.") from exc
+            # Provider bodies can carry customer/account details: log them, but
+            # only ever return a generic message to the API client.
+            logger.error("Paystack %s %s failed with status %s: %s", method, path.split("?")[0], exc.code, details[:2000])
+            raise PaystackError("The payment provider rejected the request. Please try again.") from exc
+        except (URLError, TimeoutError) as exc:
+            logger.error("Unable to reach Paystack for %s %s: %s", method, path.split("?")[0], exc)
+            raise PaystackError("The payment provider is unavailable right now. Please try again shortly.") from exc
+        except ValueError as exc:
+            logger.error("Paystack returned a non-JSON response for %s %s", method, path.split("?")[0])
+            raise PaystackError("The payment provider returned an unexpected response.") from exc
 
 
 def get_paystack_client():

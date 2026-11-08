@@ -2,18 +2,19 @@ import json
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.db import transaction
 from django.utils import timezone
 
 from hr_app_backend.authentication.models import Organization
 from hr_app_backend.authentication.services.accounts import register_company
-from hr_app_backend.authentication.services.sessions import auth_response
+from hr_app_backend.authentication.services.login import complete_sign_in
 from hr_app_backend.authentication.services.validation import normalize_email, validate_email_address, validate_passwords
 from hr_app_backend.billing.models import Subscription
 from hr_app_backend.third_parties import get_paystack_client, get_redis_client
 from hr_app_backend.utils import ConflictError, ValidationError, today_local, timedelta
 
-from .billing import PLAN_PRICES, _build_reference, _minor_units
+from .billing import PLAN_PRICES, _build_reference, _minor_units, validate_callback_url
 
 User = get_user_model()
 
@@ -47,8 +48,8 @@ def _validate_company_signup(data):
         'phone': phone,
         'size': str(data.get('size') or '').strip(),
         'industry': str(data.get('industry') or '').strip(),
-        'password': password,
-        'confirm_password': confirm_password,
+        # Only the hash is kept while payment is pending: this dict sits in Redis for up to an hour.
+        'password_hash': make_password(password),
     }
 
 
@@ -67,6 +68,7 @@ def initialize_paid_signup_checkout(payload):
         raise ValidationError('Billing cycle must be monthly or annual.')
     if not callback_url:
         raise ValidationError('Callback URL is required.')
+    validate_callback_url(callback_url)
 
     amount = PLAN_PRICES[plan][billing_cycle]
     reference = _build_reference(Subscription.PROVIDER_PAYSTACK)
@@ -103,7 +105,7 @@ def initialize_paid_signup_checkout(payload):
 
 
 @transaction.atomic
-def verify_paid_signup_checkout(reference):
+def verify_paid_signup_checkout(reference, request=None):
     redis_client = get_redis_client()
     raw_pending = redis_client.get(_pending_key(reference))
     if not raw_pending:
@@ -121,7 +123,9 @@ def verify_paid_signup_checkout(reference):
     signup = pending['signup']
     if pending.get('account_type', 'company') != 'company':
         raise ValidationError('This signup checkout is no longer valid.')
-    user = register_company(signup)
+    # Entries created before hashing was introduced still carry 'password' and are validated as before.
+    password_hash = signup.pop('password_hash', None)
+    user = register_company(signup, password_hash=password_hash)
     start_date = today_local()
     end_date = start_date + timedelta(days=365 if pending['billing_cycle'] == 'annual' else 30)
     subscription = Subscription.objects.create(
@@ -140,4 +144,4 @@ def verify_paid_signup_checkout(reference):
         provider_response=response,
     )
     redis_client.delete(_pending_key(reference))
-    return subscription, auth_response(user), response
+    return subscription, complete_sign_in(user, request), response

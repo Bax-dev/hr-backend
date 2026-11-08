@@ -1,5 +1,8 @@
-from decimal import Decimal, ROUND_HALF_UP
+import logging
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from urllib.parse import urlsplit
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -10,7 +13,9 @@ from hr_app_backend.third_parties import (
     get_flutterwave_client,
     get_paystack_client,
 )
-from hr_app_backend.utils import ValidationError, generate_uuid4, timedelta, today_local
+from hr_app_backend.utils import ValidationError, generate_uuid4, get_env, get_list, timedelta, today_local
+
+logger = logging.getLogger(__name__)
 
 PLAN_PRICES = {
     Subscription.PLAN_STARTER: {
@@ -24,6 +29,72 @@ PLAN_PRICES = {
 }
 
 TRIAL_DURATION_DAYS = 14
+
+
+def _origin(url):
+    parts = urlsplit(url or '')
+    if parts.scheme not in {'http', 'https'} or not parts.netloc:
+        return None
+    return f'{parts.scheme}://{parts.netloc}'.lower()
+
+
+def allowed_callback_origins():
+    """Origins the payment provider may send the customer back to.
+
+    ``PAYMENT_CALLBACK_ALLOWED_ORIGINS`` (comma-separated) wins; otherwise the
+    origins of ``FRONTEND_BILLING_URL`` / ``FRONTEND_LOGIN_URL`` are used.
+    """
+    configured = get_list('PAYMENT_CALLBACK_ALLOWED_ORIGINS', default=[])
+    if not configured:
+        configured = [get_env('FRONTEND_BILLING_URL', ''), get_env('FRONTEND_LOGIN_URL', '')]
+    return {origin for origin in (_origin(value) for value in configured) if origin}
+
+
+def validate_callback_url(callback_url):
+    """Reject callback URLs that would turn checkout into an open redirect.
+
+    Without this, anyone could start a checkout whose post-payment redirect
+    lands the customer on a look-alike phishing page.
+    """
+    origin = _origin(callback_url)
+    if origin is None:
+        raise ValidationError('Callback URL must be an absolute http(s) URL.')
+    allowed = allowed_callback_origins()
+    if not allowed:
+        # Nothing configured (the current ECS task sets no FRONTEND_* vars).
+        # Fail open in that case so checkout keeps working, but make it loud.
+        logger.warning(
+            'Payment callback origin %s accepted without an allow-list; set PAYMENT_CALLBACK_ALLOWED_ORIGINS.',
+            origin,
+        )
+        if not settings.DEBUG and not origin.startswith('https://'):
+            raise ValidationError('Callback URL must use https.')
+        return callback_url
+    if origin not in allowed:
+        raise ValidationError('Callback URL is not an allowed destination.')
+    return callback_url
+
+
+def public_provider_response(response):
+    """The subset of a gateway response that is safe to hand to the browser.
+
+    Full responses include customer details, card BIN/last4, authorization
+    codes and the payer's IP address; none of that belongs in an API response.
+    """
+    response = response or {}
+    data = response.get('data') or {}
+    return {
+        'status': response.get('status'),
+        'message': response.get('message'),
+        'data': {
+            'status': data.get('status'),
+            'reference': data.get('reference') or data.get('tx_ref'),
+            'amount': data.get('amount'),
+            'currency': data.get('currency'),
+            'paid_at': data.get('paid_at') or data.get('paidAt') or data.get('created_at'),
+            'channel': data.get('channel') or data.get('payment_type'),
+        },
+    }
 
 
 def _parse_date(value, *, field_name):
@@ -124,27 +195,40 @@ def _initialize_with_flutterwave(subscription, *, email, customer_name, callback
     return response
 
 
-def _verify_paystack(subscription):
+def _amount_matches(subscription, reported, *, minor_units):
+    try:
+        value = Decimal(str(reported))
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    if minor_units:
+        value = value / Decimal('100')
+    return value == subscription.amount
+
+
+def _check_paystack(subscription):
+    """Ask Paystack about the payment. Network call; must run outside DB locks."""
     response = get_paystack_client().verify_transaction(subscription.reference)
     data = response.get('data') or {}
-    paid = bool(response.get('status')) and data.get('status') == 'success'
-    subscription.provider_response = response
-    subscription.gateway_transaction_id = str(data.get('id', ''))
-    subscription.status = Subscription.STATUS_ACTIVE if paid else Subscription.STATUS_FAILED
-    subscription.paid_at = timezone.now() if paid else None
-    subscription.save(update_fields=['provider_response', 'gateway_transaction_id', 'status', 'paid_at', 'updated_at'])
+    paid = (
+        bool(response.get('status'))
+        and data.get('status') == 'success'
+        and data.get('reference') in (None, subscription.reference)
+        and _amount_matches(subscription, data.get('amount'), minor_units=True)
+        and str(data.get('currency') or '').upper() == subscription.currency.upper()
+    )
     return response, paid
 
 
-def _verify_flutterwave(subscription):
+def _check_flutterwave(subscription):
     response = get_flutterwave_client().verify_transaction(subscription.reference)
     data = response.get('data') or {}
-    paid = response.get('status') == 'success' and data.get('status') == 'successful'
-    subscription.provider_response = response
-    subscription.gateway_transaction_id = str(data.get('id', ''))
-    subscription.status = Subscription.STATUS_ACTIVE if paid else Subscription.STATUS_FAILED
-    subscription.paid_at = timezone.now() if paid else None
-    subscription.save(update_fields=['provider_response', 'gateway_transaction_id', 'status', 'paid_at', 'updated_at'])
+    paid = (
+        response.get('status') == 'success'
+        and data.get('status') == 'successful'
+        and data.get('tx_ref') in (None, subscription.reference)
+        and _amount_matches(subscription, data.get('amount'), minor_units=False)
+        and str(data.get('currency') or '').upper() == subscription.currency.upper()
+    )
     return response, paid
 
 
@@ -169,8 +253,10 @@ def initialize_subscription_payment(user, payload):
         raise ValidationError('A customer email is required to initialize payment.')
     if provider != Subscription.PROVIDER_PAYSTACK:
         raise ValidationError('Only Paystack payments are supported.')
-    if plan != Subscription.PLAN_FREE_TRIAL and not callback_url:
-        raise ValidationError('Callback URL is required for Paystack payments.')
+    if plan != Subscription.PLAN_FREE_TRIAL:
+        if not callback_url:
+            raise ValidationError('Callback URL is required for Paystack payments.')
+        validate_callback_url(callback_url)
 
     if plan != Subscription.PLAN_FREE_TRIAL:
         pending_subscription = Subscription.objects.filter(
@@ -220,12 +306,20 @@ def initialize_subscription_payment(user, payload):
     return subscription
 
 
-@transaction.atomic
 def verify_subscription_payment(user, payload):
+    """Confirm a checkout with the gateway and activate the subscription.
+
+    * Re-verifying an already active subscription is a no-op (no second gateway
+      call, and a later odd gateway answer can never flip it to failed).
+    * Payment only counts when the gateway reports the exact amount and
+      currency we charged for this reference.
+    * The gateway call runs outside any transaction; the status change is then
+      applied under a row lock so concurrent verifies apply it once.
+    """
     profile = getattr(user, 'profile', None)
     organization = getattr(profile, 'organization', None)
+    owner_filter = {'created_by': user} if organization is None else {'organization': organization}
     try:
-        owner_filter = {'created_by': user} if organization is None else {'organization': organization}
         subscription = Subscription.objects.get(reference=payload['reference'], **owner_filter)
     except Subscription.DoesNotExist as exc:
         raise ValidationError('Subscription payment reference was not found.') from exc
@@ -234,9 +328,37 @@ def verify_subscription_payment(user, payload):
     if provider != subscription.provider:
         raise ValidationError('Provider does not match the subscription reference.')
 
-    if provider == Subscription.PROVIDER_PAYSTACK:
-        response, paid = _verify_paystack(subscription)
-    else:
-        response, paid = _verify_flutterwave(subscription)
+    if subscription.status == Subscription.STATUS_ACTIVE:
+        return subscription, public_provider_response(subscription.provider_response), True
 
-    return subscription, response, paid
+    if provider == Subscription.PROVIDER_PAYSTACK:
+        response, paid = _check_paystack(subscription)
+    else:
+        response, paid = _check_flutterwave(subscription)
+
+    with transaction.atomic():
+        subscription = Subscription.objects.select_for_update().get(pk=subscription.pk)
+        if subscription.status == Subscription.STATUS_ACTIVE:
+            return subscription, public_provider_response(subscription.provider_response), True
+
+        data = response.get('data') or {}
+        subscription.provider_response = response
+        subscription.gateway_transaction_id = str(data.get('id', '') or '')
+        if paid:
+            subscription.status = Subscription.STATUS_ACTIVE
+            subscription.paid_at = timezone.now()
+        else:
+            # A payment that is still processing/abandoned stays pending so the
+            # customer can finish it; only an explicit gateway failure fails it.
+            gateway_status = str(data.get('status') or '').lower()
+            if gateway_status in {'failed', 'reversed', 'cancelled'}:
+                subscription.status = Subscription.STATUS_FAILED
+            elif gateway_status in {'success', 'successful'}:
+                logger.error(
+                    'Gateway reported success with mismatched amount/currency. subscription=%s reference=%s',
+                    subscription.pk, subscription.reference,
+                )
+                subscription.status = Subscription.STATUS_FAILED
+        subscription.save(update_fields=['provider_response', 'gateway_transaction_id', 'status', 'paid_at', 'updated_at'])
+
+    return subscription, public_provider_response(response), paid

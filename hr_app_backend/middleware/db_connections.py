@@ -1,4 +1,15 @@
-from django.db import close_old_connections
+from django.db import connections
+
+
+def _close_old_connections():
+    """Like ``django.db.close_old_connections`` but never closes a connection mid-transaction.
+
+    Closing a connection that is inside an atomic block would abort that transaction
+    (and breaks Django's TestCase, which wraps each test in one).
+    """
+    for conn in connections.all(initialized_only=True):
+        if not conn.in_atomic_block:
+            conn.close_if_unusable_or_obsolete()
 
 
 class DatabaseConnectionCleanupMiddleware:
@@ -6,11 +17,8 @@ class DatabaseConnectionCleanupMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        close_old_connections()
+        _close_old_connections()
         try:
-            response = self.get_response(request)
-            close_old_connections()
-            return response
-        except Exception:
-            close_old_connections()
-            raise
+            return self.get_response(request)
+        finally:
+            _close_old_connections()

@@ -2,7 +2,7 @@ import json
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 
 from hr_app_backend.authentication.models import Organization, UserProfile
 
@@ -105,6 +105,8 @@ class AuditLogApiTests(TestCase):
 
 
 class RecordAuditEventTests(TestCase):
+    # Two trusted proxy hops (CloudFront + ALB), independent of the local .env.
+    @override_settings(TRUSTED_PROXY_HOPS=2)
     def test_captures_actor_and_request_context(self):
         user_model = get_user_model()
         organization = Organization.objects.create(

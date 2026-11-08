@@ -8,9 +8,18 @@ from .resend import ResendError, get_resend_client
 logger = logging.getLogger(__name__)
 
 
+def _default_client():
+    # EMAIL_DELIVERY=console (local dev only) prints emails to the log instead of using Resend.
+    if getattr(settings, 'EMAIL_DELIVERY', 'resend') == 'console':
+        from .console_email import ConsoleEmailClient
+
+        return ConsoleEmailClient()
+    return get_resend_client()
+
+
 class EmailService:
     def __init__(self, client=None, default_from_email=None):
-        self.client = client or get_resend_client()
+        self.client = client or _default_client()
         self.default_from_email = default_from_email or self._resolve_default_from_email()
 
     def _resolve_default_from_email(self):

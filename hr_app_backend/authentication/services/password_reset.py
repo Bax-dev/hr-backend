@@ -1,27 +1,24 @@
-import hashlib
-import hmac
-import random
+import logging
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.hashers import make_password
 from django.db import transaction
 
-from hr_app_backend.third_parties import get_email_service, get_redis_client
+from hr_app_backend.third_parties import get_email_service
 from hr_app_backend.services import render_email_template
-from hr_app_backend.utils.errors import NotFoundError, ValidationError
+from hr_app_backend.utils.errors import ValidationError
 
-from .otp_attempts import clear_attempts, register_failed_attempt
+from ..models import UserSession
+from .otp import check_code, discard_code, issue_code
+from .sessions import revoke_all_sessions
 from .validation import normalize_email, validate_email_address, validate_passwords
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
 OTP_EXPIRY_SECONDS = 10 * 60
-OTP_NAMESPACE = 'auth:otp'
-
-
-def _otp_key(email):
-    digest = hashlib.sha256(email.encode('utf-8')).hexdigest()
-    return f'{OTP_NAMESPACE}:{digest}'
+# 'v2': codes are now stored hashed; old plain-text keys simply stop matching.
+OTP_NAMESPACE = 'auth:otp:v2'
 
 
 def _password_reset_email_body(otp_code):
@@ -29,20 +26,21 @@ def _password_reset_email_body(otp_code):
 
 
 def send_password_reset_otp(email):
+    """Email a reset code if the account exists.
+
+    The response is identical whether or not the address is registered, so
+    this endpoint cannot be used to discover which emails have accounts.
+    """
     email = normalize_email(email)
     validate_email_address(email)
+    result = {'email': email, 'expires_in': OTP_EXPIRY_SECONDS}
 
-    # Always return the same shape whether or not the account exists, so
-    # this endpoint can't be used to enumerate registered emails. The OTP is
-    # only generated and mailed when there's a real account behind it.
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
-        return {'email': email, 'expires_in': OTP_EXPIRY_SECONDS}
+    user = User.objects.filter(email=email, is_active=True).first()
+    if user is None:
+        logger.info('Password reset requested for an unknown address.')
+        return result
 
-    otp_code = f'{random.randint(0, 999999):06d}'
-    get_redis_client().setex(_otp_key(email), OTP_EXPIRY_SECONDS, otp_code)
-
+    otp_code = issue_code(OTP_NAMESPACE, email, OTP_EXPIRY_SECONDS)
     get_email_service().send_mail(
         subject='Your password reset OTP',
         body=_password_reset_email_body(otp_code),
@@ -60,33 +58,33 @@ def send_password_reset_otp(email):
             },
         ),
     )
-    return {'email': email, 'expires_in': OTP_EXPIRY_SECONDS}
+    return result
 
 
 def verify_password_reset_otp(email, otp):
     email = normalize_email(email)
-    key = _otp_key(email)
-    stored = get_redis_client().get(key)
-    if not stored or not hmac.compare_digest(stored, str(otp).strip()):
-        if stored:
-            register_failed_attempt(key)
-        raise ValidationError('Invalid or expired OTP.')
-    clear_attempts(key)
+    check_code(OTP_NAMESPACE, email, otp)
     return {'email': email, 'verified': True}
 
 
 @transaction.atomic
 def reset_password(email, otp, password, confirm_password):
     email = normalize_email(email)
-    verify_password_reset_otp(email, otp)
+    # Validate the new password first so a typo doesn't burn an OTP attempt.
     validate_passwords(password, confirm_password)
+    verify_password_reset_otp(email, otp)
 
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist as exc:
-        raise NotFoundError('No account was found for this email address.') from exc
+    user = User.objects.filter(email=email).first()
+    if user is None:
+        # Unreachable in practice (a code is only issued for real accounts),
+        # but keep the message generic either way.
+        raise ValidationError('Invalid or expired OTP.', code='OTP_INVALID')
 
-    user.password = make_password(password)
+    user.set_password(password)
     user.save(update_fields=['password'])
-    get_redis_client().delete(_otp_key(email))
+    discard_code(OTP_NAMESPACE, email)
+    # Whoever triggered the reset may be recovering from a compromise: every
+    # existing session stops working. The view then issues a fresh one (or an
+    # MFA challenge if two-step verification is on).
+    revoke_all_sessions(user, UserSession.REVOKED_PASSWORD_RESET)
     return user

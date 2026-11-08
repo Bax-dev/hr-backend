@@ -1,10 +1,9 @@
 import json
-from http import HTTPStatus
 
 from django.conf import settings
 from django.http import JsonResponse
 
-from hr_app_backend.utils.errors import AppError
+from hr_app_backend.utils.errors import AppError, error_payload
 
 # Session token lives in an httpOnly cookie so it can't be read by JavaScript
 # (mitigates XSS-driven token theft). The Authorization header fallback below
@@ -60,22 +59,5 @@ def session_json_response(session_payload, status=200):
 
 
 def error_response(error):
-    status = int(getattr(error, 'status_code', 400) or 400)
-    try:
-        status_title = HTTPStatus(status).phrase
-    except ValueError:
-        status_title = 'Request Error'
-
-    detail = str(getattr(error, 'message', '') or 'Something went wrong. Please try again.').strip()
-
-    return JsonResponse(
-        {
-            'success': False,
-            'statusCode': status,
-            'status': status_title,
-            'message': detail,
-            'detail': detail,
-            'error': status_title.lower().replace(' ', '_'),
-        },
-        status=status,
-    )
+    body = error_payload(error)
+    return JsonResponse(body, status=body['statusCode'])

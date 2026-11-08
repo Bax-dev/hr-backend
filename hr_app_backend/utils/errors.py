@@ -5,9 +5,16 @@ class AppError(Exception):
     status_code = 400
     default_message = 'An application error occurred.'
 
-    def __init__(self, message=None, *, status_code=None):
+    code = ''
+
+    def __init__(self, message=None, *, status_code=None, code=None, extra=None):
         self.message = message or self.default_message
         self.status_code = status_code or self.status_code
+        # Optional machine-readable code (e.g. ``MFA_REQUIRED``) so clients can
+        # branch without matching on human-readable messages.
+        self.code = code or self.code
+        # Optional extra top-level fields for the error body (e.g. ``retry_after``).
+        self.extra = dict(extra or {})
         super().__init__(self.message)
 
 
@@ -61,7 +68,7 @@ def error_payload(error):
         getattr(error, 'message', '') or 'Something went wrong. Please try again.'
     ).strip()
 
-    return {
+    body = {
         'success': False,
         'statusCode': status,
         'status': status_title,
@@ -69,3 +76,9 @@ def error_payload(error):
         'detail': detail,
         'error': status_title.lower().replace(' ', '_'),
     }
+    code = getattr(error, 'code', '')
+    if code:
+        body['code'] = code
+    for key, value in (getattr(error, 'extra', None) or {}).items():
+        body.setdefault(key, value)
+    return body

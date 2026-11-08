@@ -1,31 +1,26 @@
-import hashlib
-import hmac
-import random
+import logging
 
 from django.contrib.auth import get_user_model
 
-from hr_app_backend.third_parties import get_email_service, get_redis_client
+from hr_app_backend.third_parties import get_email_service
 from hr_app_backend.services import render_email_template
-from hr_app_backend.utils.errors import NotFoundError, ValidationError
+from hr_app_backend.utils.errors import ValidationError
 
-from .otp_attempts import clear_attempts, register_failed_attempt
+from .otp import check_code, discard_code, issue_code
 from .validation import normalize_email
+
+logger = logging.getLogger(__name__)
 
 User = get_user_model()
 
 SIGNUP_OTP_EXPIRY_SECONDS = 10 * 60
-SIGNUP_OTP_NAMESPACE = 'auth:signup-otp'
-
-
-def _otp_key(email):
-    digest = hashlib.sha256(email.encode('utf-8')).hexdigest()
-    return f'{SIGNUP_OTP_NAMESPACE}:{digest}'
+# 'v2': codes are now stored hashed; anyone mid-signup can use "resend code".
+SIGNUP_OTP_NAMESPACE = 'auth:signup-otp:v2'
 
 
 def send_signup_otp(user):
     """Generate and email a fresh signup-verification OTP for ``user``."""
-    otp_code = f'{random.randint(0, 999999):06d}'
-    get_redis_client().setex(_otp_key(user.email), SIGNUP_OTP_EXPIRY_SECONDS, otp_code)
+    otp_code = issue_code(SIGNUP_OTP_NAMESPACE, user.email, SIGNUP_OTP_EXPIRY_SECONDS)
 
     get_email_service().send_mail(
         subject='Verify your email address',
@@ -52,38 +47,32 @@ def send_signup_otp(user):
 
 def resend_signup_otp(email):
     email = normalize_email(email)
-    try:
-        user = User.objects.select_related('profile').get(email=email)
-    except User.DoesNotExist:
-        # Same response shape as the success path so this endpoint can't be
-        # used to enumerate registered emails.
-        return {'email': email, 'expires_in': SIGNUP_OTP_EXPIRY_SECONDS}
+    result = {'email': email, 'expires_in': SIGNUP_OTP_EXPIRY_SECONDS}
+    user = User.objects.select_related('profile').filter(email=email).first()
+    if user is None:
+        # Same response as a real resend so the endpoint can't enumerate accounts.
+        logger.info('Signup OTP resend requested for an unknown address.')
+        return result
 
     # A previous verification may have committed successfully while its HTTP
     # response failed. Sending a fresh code lets the owner recover that signup
     # session without bypassing proof of access to the email inbox.
-    return send_signup_otp(user)
+    send_signup_otp(user)
+    return result
 
 
 def verify_signup_otp(email, otp):
     email = normalize_email(email)
-    key = _otp_key(email)
-    stored = get_redis_client().get(key)
-    if not stored or not hmac.compare_digest(stored, str(otp).strip()):
-        if stored:
-            register_failed_attempt(key)
-        raise ValidationError('Invalid or expired OTP.')
-    clear_attempts(key)
+    check_code(SIGNUP_OTP_NAMESPACE, email, otp)
 
-    try:
-        user = User.objects.select_related('profile').get(email=email)
-    except User.DoesNotExist as exc:
-        raise NotFoundError('No account was found for this email address.') from exc
+    user = User.objects.select_related('profile').filter(email=email).first()
+    if user is None:
+        raise ValidationError('Invalid or expired OTP.', code='OTP_INVALID')
 
     profile = getattr(user, 'profile', None)
     if profile is not None and not profile.email_verified:
         profile.email_verified = True
         profile.save(update_fields=['email_verified', 'updated_at'])
 
-    get_redis_client().delete(key)
+    discard_code(SIGNUP_OTP_NAMESPACE, email)
     return user
